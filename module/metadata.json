@@ -1,0 +1,26 @@
+{
+  "name": "netgraph",
+  "version": "0.0.1",
+  "description": "Live observer of every network connection the Logos process tree holds, grouped by service and network. Local only, off until turned on.",
+  "author": "corpetty",
+  "type": "core",
+  "category": "monitoring",
+  "main": "netgraph_plugin",
+  "interface": "universal",
+  "dependencies": [],
+  "interface_dependencies": [
+    { "name": "connection_source", "file": "interfaces/connection_source.h", "impl_class": "IConnectionSource" }
+  ],
+
+  "nix": {
+    "external_libraries": [],
+    "packages": {
+      "build": [],
+      "runtime": ["nlohmann_json"]
+    },
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": []
+    }
+  }
+}

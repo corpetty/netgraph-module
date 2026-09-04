@@ -1,0 +1,5 @@
+result
+result-*
+/module/third_party/
+*.o
+.direnv/
