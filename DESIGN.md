@@ -195,6 +195,13 @@ So the pid problem splits in two, and the split is now in the code:
    host and fits the interface-dependency model). (c) only if a host change is
    already on the table.
 
+   **Decision (2026-09-04): the recommended path — core_service for the doctest
+   now, a stats-exporting core module for Basecamp production.** `setEnabled`
+   config carries `stats_source` (default `core_service`) and `stats_token`;
+   `resolveNames()` calls its `getModuleStats()` and `parseModuleStats()` turns
+   the table into pid→name. For Basecamp, point `stats_source` at the production
+   stats module (declared as a netgraph dependency) with no other change.
+
 ## M0 status
 
 Built and unit-tested (pure, no SDK — `tests/run_local.sh`, all green), and the
@@ -211,25 +218,39 @@ Linux collector verified against this host's live `/proc`:
 - `process_source.h` + `linux_process_source.cpp` — ancestry pid discovery.
   Verified live.
 - `socket_table_factory.cpp` + `fake_sources.cpp` — platform pick + fakes.
-- `netgraph_impl.{h,cpp}` — the `setEnabled`/`snapshot`/`getInfo` surface and the
-  timer thread driving `buildSnapshot`. Compiles against the SDK (not buildable
-  in the dev sandbox); logic factored into the tested pure functions.
+- `attribution.{h,cpp}` — pure parsers for the two SDK-fed inputs:
+  `parseModuleStats()` (getModuleStats table → pid→name) and
+  `parseProviderConnections()` (a provider payload → ProviderLabel rows). Tested.
+- `netgraph_impl.{h,cpp}` — the `setEnabled`/`snapshot`/`getInfo` surface, the
+  timer thread driving `buildSnapshot`, and Collector B wired through the tested
+  parsers. Compiles against the SDK (not buildable in the dev sandbox); logic
+  factored into the tested pure functions.
 - `macos_socket_table.cpp` / `macos_process_source.cpp` — libproc impls, written
   from the documented API, **unverified on this host** (Linux sandbox); verify on
   Apple Silicon.
 
-Deferred:
+Remaining:
 
-- **Collector B** provider bind + the pid→name resolver — both wait on the
-  attribution decision above (marked TODO in `netgraph_impl.cpp`).
+- **Two SDK fetches**, isolated in `netgraph_impl.cpp` (`fetchModuleStats`,
+  `fetchProviderConnections`) — the only code not exercised on-host. Each returns
+  empty until its one inter-module call is confirmed on a real host (the
+  `LpClient` invoke of `getModuleStats` with the token; the
+  `bind_connection_source(name).collectConnections()` call). Collector A runs
+  regardless; these light up attribution + Collector B without touching the
+  tested logic.
 - **M0 doctest** under `logoscore` — open a known connection, see it in
-  `snapshot()` (mirrors openmetrics' `doctests/`). Wants the attribution path
-  chosen so the doctest can assert real module names via (a).
-- openmetrics cross-check (you scoped it in early) — reads openmetrics'
-  aggregated counters, compares reported peers vs sockets per pid, surfaces the
-  gap. An optional declared dependency; lands with Collector B.
+  `snapshot()` (mirrors openmetrics' `doctests/`), asserting real module names
+  via core_service.
+- **CDDL validation** of the provider payload (M3) — layered on top of
+  `parseProviderConnections`, reject a malformed feed rather than merging it.
+- openmetrics cross-check (scoped in early) — reads openmetrics' aggregated
+  counters, compares reported peers vs sockets per pid, surfaces the gap. An
+  optional declared dependency; lands with Collector B.
+- macOS libproc verification on Apple Silicon.
 
 ## Next step
 
-Decide the attribution path (a/b/c), then wire Collector B + the resolver and
-write the M0 doctest. macOS verification on an Apple Silicon box in parallel.
+Confirm the two SDK fetches on a real `logoscore` host (`fetchModuleStats`,
+`fetchProviderConnections`), then write the M0 doctest that opens a known
+connection and asserts it — with real module names via core_service — in
+`snapshot()`. macOS verification on an Apple Silicon box in parallel.

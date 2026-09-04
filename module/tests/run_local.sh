@@ -38,9 +38,10 @@ build_run() { # name, sources...
   "$work/$name" || rc=1
 }
 
-build_run parse_test     "$here/parse_test.cpp"     "$src/proc_net_parse.cpp"
-build_run merge_test     "$here/merge_test.cpp"     "$src/merge.cpp"
-build_run sweep_test      "$here/sweep_test.cpp"     "$src/sweep.cpp" "$src/merge.cpp" "$src/fake_sources.cpp"
+build_run parse_test       "$here/parse_test.cpp"       "$src/proc_net_parse.cpp"
+build_run merge_test       "$here/merge_test.cpp"       "$src/merge.cpp"
+build_run sweep_test       "$here/sweep_test.cpp"       "$src/sweep.cpp" "$src/merge.cpp" "$src/fake_sources.cpp"
+build_run attribution_test "$here/attribution_test.cpp" "$src/attribution.cpp" "$src/merge.cpp"
 if [ "$(uname -s)" = "Linux" ]; then
   build_run linux_live_test "$here/linux_live_test.cpp" \
     "$src/linux_socket_table.cpp" "$src/linux_process_source.cpp" "$src/proc_net_parse.cpp"

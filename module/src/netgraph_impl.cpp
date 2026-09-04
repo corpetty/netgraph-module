@@ -2,9 +2,11 @@
 
 #include <chrono>
 #include <cstdint>
+#include <unordered_map>
 
 #include <logos_json.h>  // LogosMap
 
+#include "attribution.h"
 #include "sweep.h"
 #include "merge.h"
 
@@ -55,6 +57,9 @@ int64_t NetgraphImpl::setEnabled(const std::string& configJson) {
                 if (s.is_string() && !s.get<std::string>().empty())
                     m_config.sources.push_back(s.get<std::string>());
         }
+
+        m_config.statsSource = cfg.value("stats_source", m_config.statsSource);
+        m_config.statsToken = cfg.value("stats_token", m_config.statsToken);
 
         if (enable == m_enabled) return 0;  // config updated, no state change
         m_enabled = enable;
@@ -135,9 +140,16 @@ void NetgraphImpl::runLoop() {
 void NetgraphImpl::doSweepAndPublish(const Config& cfg) {
     if (!m_sockets || !m_procSource) return;  // unsupported host
 
-    std::vector<netgraph::ProviderLabel> labels = collectProviderLabels(cfg);
+    // pid <-> name attribution, once per sweep, shared by the base module label
+    // and Collector B's row placement.
+    std::unordered_map<int64_t, std::string> pidNames = resolveNames(cfg);
+    std::unordered_map<std::string, int64_t> name2pid;
+    for (const auto& kv : pidNames) name2pid[kv.second] = kv.first;
+
+    std::vector<netgraph::ProviderLabel> labels = collectProviderLabels(cfg, name2pid);
     std::string doc = netgraph::buildSnapshot(*m_procSource, *m_sockets, labels,
-                                              cfg.includeHost, /*enabled=*/true, nowMs());
+                                              cfg.includeHost, /*enabled=*/true, nowMs(),
+                                              pidNames);
 
     // Recount for getInfo without re-walking: parse is cheap relative to a sweep.
     int sockets = 0, attributed = 0, derived = 0;
@@ -156,15 +168,64 @@ void NetgraphImpl::doSweepAndPublish(const Config& cfg) {
     m_lastDerived = derived;
 }
 
-std::vector<netgraph::ProviderLabel> NetgraphImpl::collectProviderLabels(const Config& cfg) {
+// ── The two SDK-coupled fetches, isolated ────────────────────────────────────
+// These are the only points that touch inter-module IPC, and the only code in
+// this module not yet exercised on-host. Everything downstream (parseModuleStats,
+// parseProviderConnections, merge) is pure and unit-tested. Each returns an empty
+// document until its one SDK call is confirmed on a real host; Collector A runs
+// regardless, so the module produces a graph today and these light up Collector B
+// and attribution without touching the tested logic.
+namespace {
+
+// getModuleStats() on the configured stats source. Under the logoscore daemon
+// that is `core_service` (token-gated, no shipped .lidl → a by-name invoke via
+// the SDK LpClient — logos_lp_client.h invoke()). For Basecamp production, point
+// statsSource at the stats-exporting core module declared as a netgraph
+// dependency and call it through its typed wrapper (modules().<dep>...).
+LogosMap fetchModuleStats(LogosModuleContext& /*ctx*/,
+                          const std::string& /*statsSource*/,
+                          const std::string& /*token*/) {
+    // TODO(on-host): LpClient invoke of "getModuleStats" on statsSource with the
+    // token; parse the returned JSON string to LogosMap. Returns empty until
+    // wired — attribution then degrades to null, which is correct.
+    return LogosMap::object();
+}
+
+// collectConnections() on one bound connection_source provider.
+LogosMap fetchProviderConnections(LogosModuleContext& /*ctx*/,
+                                  const std::string& /*moduleName*/) {
+    // TODO(on-host): modules().bind_connection_source(moduleName).collectConnections()
+    // Returns empty until wired — Collector B contributes nothing, Collector A
+    // is unaffected.
+    return LogosMap::object();
+}
+
+}  // namespace
+
+std::unordered_map<int64_t, std::string> NetgraphImpl::resolveNames(const Config& cfg) {
+    if (cfg.statsSource.empty()) return {};
+    try {
+        LogosMap stats = fetchModuleStats(*this, cfg.statsSource, cfg.statsToken);
+        return netgraph::parseModuleStats(stats);
+    } catch (...) {
+        return {};  // unreachable stats source => no attribution (rows still shown)
+    }
+}
+
+std::vector<netgraph::ProviderLabel> NetgraphImpl::collectProviderLabels(
+    const Config& cfg, const std::unordered_map<std::string, int64_t>& name2pid) {
     std::vector<netgraph::ProviderLabel> labels;
-    (void)cfg;
-    // TODO(attribution + M3): for each name in cfg.sources:
-    //   LogosMap payload = modules().bind_connection_source(name).collectConnections();
-    //   (empty/error => skip; one bad provider never breaks a sweep)
-    //   validate payload against the connection_source CDDL schema, then for each
-    //   entry build a ProviderLabel with pid = resolve(name). Placing the row by
-    //   pid needs the same pid<->name attribution the module labels need — both
-    //   wait on the attribution decision (DESIGN "Process-tree attribution").
+    for (const auto& name : cfg.sources) {
+        auto it = name2pid.find(name);
+        if (it == name2pid.end()) continue;  // no pid resolved yet => can't place rows
+        const int64_t pid = it->second;
+        try {
+            LogosMap payload = fetchProviderConnections(*this, name);
+            // TODO(M3): validate payload against the connection_source CDDL schema
+            // and reject a malformed feed rather than merging it.
+            auto rows = netgraph::parseProviderConnections(name, pid, payload);
+            for (auto& r : rows) labels.push_back(std::move(r));
+        } catch (...) { /* one bad provider never breaks a sweep */ }
+    }
     return labels;
 }

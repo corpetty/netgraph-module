@@ -30,6 +30,8 @@ logos_module(
         src/merge.cpp
         src/sweep.h
         src/sweep.cpp
+        src/attribution.h
+        src/attribution.cpp
         src/socket_table_factory.cpp
         src/fake_sources.cpp
         src/linux_socket_table.cpp

@@ -9,6 +9,7 @@ failure.
 | `parse_test.cpp` | `/proc/net` decode: v4/v6 address+port endianness, TCP/UDP state mapping, listen/inbound/outbound inference, no-remote handling | nothing (stdlib) |
 | `merge_test.cpp` | A/B merge: socket rows authoritative, provider labels enrich, pid→name attribution, derived edges marked, host tagging, null labels shown, stable id | a `LogosMap` (nlohmann::json) |
 | `sweep_test.cpp` | the whole pure pipeline (`buildSnapshot`) over the fakes: discovery → enumerate → merge → document, include-host on/off, Collector A alone | `LogosMap` + fakes |
+| `attribution_test.cpp` | the SDK-fed input parsers: `getModuleStats` → pid→name (numeric/string pids, object envelope), and a provider payload → labels (derived edges, no-remote drop, malformed never throws) | `LogosMap` |
 | `linux_live_test.cpp` | Collector A end-to-end on a live Linux host: open a listener, find it via `/proc` + inode→pid, ancestry source includes self | Linux `/proc`, `-pthread` |
 
 ## Run locally (no SDK)

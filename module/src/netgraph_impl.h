@@ -28,6 +28,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <logos_module_context.h>  // LogosModuleContext base (gives modules())
@@ -72,6 +73,10 @@ private:
         bool     includeHost = true;
         int64_t  rootPid = 0;
         std::vector<std::string> sources;
+        // Attribution path (chosen for M0: core_service under the logoscore
+        // daemon now; a stats-exporting core module for Basecamp production).
+        std::string statsSource = "core_service";  // module exposing getModuleStats()
+        std::string statsToken;                     // token core_service requires
     };
 
     void startSweep();   // spawn the timer thread (caller must not hold m_mutex)
@@ -79,11 +84,17 @@ private:
     void runLoop();      // the timer thread body: sweep, wait, repeat
     void doSweepAndPublish(const Config& cfg);
 
-    // Collector B: bind each configured connection_source provider and collect
-    // its labels. Needs the SDK bound wrapper AND pid<->name attribution to place
-    // rows (see DESIGN "Process-tree attribution"); returns empty until that
-    // lands, which is correct — Collector A alone still produces a graph.
-    std::vector<netgraph::ProviderLabel> collectProviderLabels(const Config& cfg);
+    // pid -> module name for this sweep, from the stats source (Collector B and
+    // the base module label both need it). Empty when the source is unreachable
+    // (e.g. Basecamp before the production stats module) — rows then carry a real
+    // pid and module:null, which is correct: the unlabelled rows are the point.
+    std::unordered_map<int64_t, std::string> resolveNames(const Config& cfg);
+
+    // Collector B: bind each configured connection_source provider, collect its
+    // labels, and place them by pid via name2pid. One bad provider never breaks a
+    // sweep. Empty sources (or none implementing collectConnections) => no labels.
+    std::vector<netgraph::ProviderLabel> collectProviderLabels(
+        const Config& cfg, const std::unordered_map<std::string, int64_t>& name2pid);
 
     std::mutex m_mutex;                       // guards the fields below
     bool       m_enabled = false;
