@@ -35,6 +35,7 @@
 #include "collector.h"        // netgraph::ISocketTable
 #include "process_source.h"   // netgraph::IProcessSource
 #include "name_resolver.h"    // netgraph::INameResolver, ModuleStat
+#include "merge.h"            // netgraph::ProviderLabel (collectProviderLabels return)
 
 class NetgraphImpl : public LogosModuleContext {
 public:

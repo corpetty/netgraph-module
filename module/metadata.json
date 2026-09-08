@@ -7,6 +7,10 @@
   "category": "monitoring",
   "main": "netgraph_module_plugin",
   "interface": "universal",
+  "codegen": {
+    "impl_header": "netgraph_impl.h",
+    "impl_class": "NetgraphImpl"
+  },
   "dependencies": [],
   "interface_dependencies": [
     { "name": "connection_source", "file": "interfaces/connection_source.h", "impl_class": "IConnectionSource" },
