@@ -34,6 +34,7 @@
 
 #include "collector.h"        // netgraph::ISocketTable
 #include "process_source.h"   // netgraph::IProcessSource
+#include "name_resolver.h"    // netgraph::INameResolver, ModuleStat
 
 class NetgraphImpl : public LogosModuleContext {
 public:
@@ -79,11 +80,14 @@ private:
     void runLoop();      // the timer thread body: sweep, wait, repeat
     void doSweepAndPublish(const Config& cfg);
 
-    // Collector B: bind each configured connection_source provider and collect
-    // its labels. Needs the SDK bound wrapper AND pid<->name attribution to place
-    // rows (see DESIGN "Process-tree attribution"); returns empty until that
-    // lands, which is correct — Collector A alone still produces a graph.
-    std::vector<netgraph::ProviderLabel> collectProviderLabels(const Config& cfg);
+    // Collector B: bind each configured connection_source provider, collect its
+    // payload through the SDK wrapper, and parse it (provider_parse.cpp) into
+    // labels. `stats` is this sweep's pid<->name attribution, used to place each
+    // provider's rows by its pid; a provider with no resolved pid still enriches
+    // by remote/local, it just won't pid-key a socket. One broken or missing
+    // provider is skipped, never fatal (openmetrics' scrape guarantee).
+    std::vector<netgraph::ProviderLabel> collectProviderLabels(
+        const Config& cfg, const std::vector<netgraph::ModuleStat>& stats);
 
     std::mutex m_mutex;                       // guards the fields below
     bool       m_enabled = false;
@@ -101,4 +105,10 @@ private:
     // collectors, created on first enable
     std::unique_ptr<netgraph::ISocketTable>   m_sockets;
     std::unique_ptr<netgraph::IProcessSource> m_procSource;
+
+    // pid<->name attribution. Defaults to the honest NullNameResolver (no host
+    // stats reachable => module:null on every row). The chosen attribution path
+    // installs a real resolver here — see makeResolver() in the .cpp and DESIGN
+    // "Process-tree attribution".
+    std::unique_ptr<netgraph::INameResolver>  m_resolver;
 };

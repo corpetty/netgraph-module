@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "collector.h"        // ISocketTable
@@ -23,11 +24,17 @@ namespace netgraph {
 // `labels` are the connection_source provider rows for this sweep (empty is
 // valid — Collector A alone produces a real graph). includeHost adds and tags
 // the host process.
+//
+// `extraNames` is the resolver-supplied pid -> module-name attribution (see
+// name_resolver.h). It overlays the ancestry source's own names (which are empty
+// today), so absent a resolver it is {} and rows keep module:null — the accepted
+// degraded behaviour. A provider label still refines on top of this.
 std::string buildSnapshot(IProcessSource& procSource,
                           ISocketTable& sockets,
                           const std::vector<ProviderLabel>& labels,
                           bool includeHost,
                           bool enabled,
-                          int64_t sweptAtMs);
+                          int64_t sweptAtMs,
+                          const std::unordered_map<int64_t, std::string>& extraNames = {});
 
 }  // namespace netgraph

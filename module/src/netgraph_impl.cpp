@@ -7,20 +7,46 @@
 
 #include "sweep.h"
 #include "merge.h"
+#include "provider_parse.h"   // netgraph::parseConnectionSourcePayload (pure)
+#include "name_resolver.h"    // netgraph::INameResolver, ModuleStat (pure)
 
 // Generated at build time by logos-cpp-generator. Defines `LogosModules` with
 // the `bind_connection_source(moduleName)` factory (because metadata.json
 // declares an interface_dependency on `connection_source`). Included only in the
 // .cpp so the impl header the generator parses stays free of codegen types.
 //
-// TODO(M3/attribution): #include "logos_sdk.h" — enable when Collector B binds
-// providers. Collector A needs none of it.
+// Collector B needs the generated bind wrapper; Collector A needs none of it.
+#include "logos_sdk.h"
 
 namespace {
 
 int64_t nowMs() {
     using namespace std::chrono;
     return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+// Install the pid<->name resolver for the chosen attribution path.
+//
+// Default: NullNameResolver — honest under a host that exposes no reachable stats
+// table (plain Basecamp today). Every row keeps a real pid and module:null.
+//
+// Path (a), the M0 doctest under logoscore: bind the daemon's `core_service`
+// module and parse its getModuleStats() through netgraph::parseModuleStats. That
+// binding is only available under logoscore-cli, so it is installed by the
+// doctest fixture / a build flag, not unconditionally here.
+//
+// Path (b), production under Basecamp: a small stats-exporting core module
+// declared as a netgraph interface_dependency, bound the same way as a
+// connection_source and parsed with the same parseModuleStats.
+//
+// BOTH paths need a pid in the stats payload. The real
+// logos_core_get_module_stats() does NOT emit one today (it computes the pid but
+// only reports name/cpu/mem) — a one-line upstream add of "pid" unlocks
+// attribution; until then parseModuleStats yields hasPid=false and this resolver
+// still returns names, they just don't attribute. See DESIGN "Process-tree
+// attribution".
+std::unique_ptr<netgraph::INameResolver> makeResolver() {
+    return std::make_unique<netgraph::NullNameResolver>();
 }
 
 }  // namespace
@@ -99,6 +125,7 @@ void NetgraphImpl::startSweep() {
     if (m_running) return;
     if (!m_sockets)    m_sockets = netgraph::makeSocketTable();
     if (!m_procSource) m_procSource = netgraph::makeProcessSource(m_config.rootPid);
+    if (!m_resolver)   m_resolver = makeResolver();
     m_stop = false;
     m_running = true;
     m_thread = std::thread([this] { runLoop(); });
@@ -135,9 +162,18 @@ void NetgraphImpl::runLoop() {
 void NetgraphImpl::doSweepAndPublish(const Config& cfg) {
     if (!m_sockets || !m_procSource) return;  // unsupported host
 
-    std::vector<netgraph::ProviderLabel> labels = collectProviderLabels(cfg);
+    // One attribution read per sweep, shared by Collector A (pid->name on every
+    // socket row) and Collector B (name->pid to place a provider's rows).
+    std::vector<netgraph::ModuleStat> stats;
+    if (m_resolver) {
+        try { stats = m_resolver->stats(); } catch (...) {}  // never break a sweep
+    }
+    std::unordered_map<int64_t, std::string> extraNames = netgraph::pidNamesFrom(stats);
+
+    std::vector<netgraph::ProviderLabel> labels = collectProviderLabels(cfg, stats);
     std::string doc = netgraph::buildSnapshot(*m_procSource, *m_sockets, labels,
-                                              cfg.includeHost, /*enabled=*/true, nowMs());
+                                              cfg.includeHost, /*enabled=*/true, nowMs(),
+                                              extraNames);
 
     // Recount for getInfo without re-walking: parse is cheap relative to a sweep.
     int sockets = 0, attributed = 0, derived = 0;
@@ -156,15 +192,33 @@ void NetgraphImpl::doSweepAndPublish(const Config& cfg) {
     m_lastDerived = derived;
 }
 
-std::vector<netgraph::ProviderLabel> NetgraphImpl::collectProviderLabels(const Config& cfg) {
+std::vector<netgraph::ProviderLabel> NetgraphImpl::collectProviderLabels(
+        const Config& cfg, const std::vector<netgraph::ModuleStat>& stats) {
     std::vector<netgraph::ProviderLabel> labels;
-    (void)cfg;
-    // TODO(attribution + M3): for each name in cfg.sources:
-    //   LogosMap payload = modules().bind_connection_source(name).collectConnections();
-    //   (empty/error => skip; one bad provider never breaks a sweep)
-    //   validate payload against the connection_source CDDL schema, then for each
-    //   entry build a ProviderLabel with pid = resolve(name). Placing the row by
-    //   pid needs the same pid<->name attribution the module labels need — both
-    //   wait on the attribution decision (DESIGN "Process-tree attribution").
+
+    for (const auto& name : cfg.sources) {
+        // The provider's own pid, so its rows key against its sockets. 0 when the
+        // resolver can't attribute it yet — the label still enriches by endpoint.
+        const int64_t pid = netgraph::pidForName(stats, name);
+
+        // Fetch the payload through the generated bound wrapper. A module that
+        // doesn't implement collectConnections(), or that errors/times out, is
+        // skipped — one bad provider never breaks a sweep.
+        LogosMap payload;
+        try {
+            payload = modules().bind_connection_source(name).collectConnections();
+        } catch (...) {
+            continue;
+        }
+
+        // Pure parse + validation (provider_parse.cpp). Malformed entries are
+        // dropped there; a malformed top-level shape yields no labels.
+        // TODO(M3): validate against the connection_source CDDL schema before this,
+        // rejecting a non-conforming feed wholesale rather than per-entry.
+        netgraph::ProviderParseResult r =
+            netgraph::parseConnectionSourcePayload(name, pid, payload);
+        for (auto& lbl : r.labels) labels.push_back(std::move(lbl));
+    }
+
     return labels;
 }

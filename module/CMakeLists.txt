@@ -28,6 +28,10 @@ logos_module(
         src/proc_net_parse.cpp
         src/merge.h
         src/merge.cpp
+        src/provider_parse.h
+        src/provider_parse.cpp
+        src/name_resolver.h
+        src/name_resolver.cpp
         src/sweep.h
         src/sweep.cpp
         src/socket_table_factory.cpp

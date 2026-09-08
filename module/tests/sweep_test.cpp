@@ -86,6 +86,14 @@ int main() {
     CHECK(doc3["connections"].size() == 2);
     for (const auto& r : doc3["connections"]) CHECK(r["module"].is_null());
 
+    // Resolver-supplied names (the real path: ancestry leaves names empty, the
+    // resolver attributes pid->name). Same plain tree, but extraNames names 1234.
+    std::unordered_map<int64_t, std::string> extraNames = {{1234, "blockchain_module"}};
+    std::string out4 = buildSnapshot(*plain, *tbl, {}, false, true, 0, extraNames);
+    LogosMap doc4 = LogosMap::parse(out4);
+    CHECK(doc4["connections"].size() == 2);
+    for (const auto& r : doc4["connections"]) CHECK(r["module"] == "blockchain_module");
+
     if (failures == 0) std::printf("sweep_test: OK\n");
     else std::printf("sweep_test: %d FAILURE(S)\n", failures);
     return failures ? 1 : 0;

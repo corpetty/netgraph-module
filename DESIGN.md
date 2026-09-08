@@ -177,10 +177,10 @@ So the pid problem splits in two, and the split is now in the code:
    sets the module's dependency shape:
 
    - **(a) core_service under the logoscore-cli daemon.** Zero new code upstream;
-     `core_service.getModuleStats()` gives name+pid. But it is daemon-only — it
-     does **not** attribute anything under Basecamp, where the module ships. Good
-     enough to make the **M0 doctest** show real names (the doctest runs under
-     `logoscore`), not a production answer.
+     `core_service.getModuleStats()` gives name (+pid, see the finding below).
+     But it is daemon-only — it does **not** attribute anything under Basecamp,
+     where the module ships. Good enough to make the **M0 doctest** show real
+     names (the doctest runs under `logoscore`), not a production answer.
    - **(b) a small stats-exporting core module**, declared as a netgraph
      dependency, that wraps `logos_core_get_module_stats()` and exposes it over
      an inter-module call. Works under both hosts and stays within the
@@ -194,6 +194,22 @@ So the pid problem splits in two, and the split is now in the code:
    production path** for Basecamp (smallest change that attributes under the real
    host and fits the interface-dependency model). (c) only if a host change is
    already on the table.
+
+   **DECISION (2026-09-04): (a) now for the M0 doctest, (b) for production.** The
+   resolver seam (`name_resolver.h`, `INameResolver`) and the pure stats decode
+   (`parseModuleStats`) are built and tested to this shape; `netgraph_impl`
+   defaults to `NullNameResolver` and installs the real resolver via
+   `makeResolver()` per the chosen path.
+
+   **FINDING (2026-09-04) — `getModuleStats()` omits `pid`.** Verified against
+   `logos-liblogos/src/logos_core/process_stats.cpp`: the real payload is
+   `[{name, cpu_percent, cpu_time_seconds, memory_mb}]` — **no `pid`**. Both (a)
+   and (b) join a socket (which carries a pid) to a name, so both need the pid.
+   The pid is already computed in that function (`process->processId()`); emitting
+   it is a **one-line upstream add** (`moduleObj["pid"] = (double)pid;`).
+   `parseModuleStats` reads `pid` when present and degrades to name-only
+   (`hasPid=false` → no attribution, `module:null`) when absent — so netgraph is
+   correct either way and the one-liner simply switches attribution on.
 
 ## M0 status
 
@@ -218,18 +234,50 @@ Linux collector verified against this host's live `/proc`:
   from the documented API, **unverified on this host** (Linux sandbox); verify on
   Apple Silicon.
 
+## Collector B + resolver status (2026-09-04)
+
+The attribution decision is made, so Collector B and the resolver are wired at
+every layer that does not require the live SDK/host, and unit-tested:
+
+- `provider_parse.{h,cpp}` — PURE Collector B: a `connection_source` payload →
+  `ProviderLabel`s for a given `(module, pid)`. Strict on the match key (no usable
+  remote endpoint → entry dropped), lenient on labels (unknown transport/direction
+  ignored), never throws on an untrusted feed (per-entry skip + count). Tested
+  (`tests/provider_parse_test.cpp`).
+- `name_resolver.{h,cpp}` — PURE attribution decode + the `INameResolver` seam +
+  `NullNameResolver`. `parseModuleStats` handles the real name-only payload and
+  the pid-augmented one; `pidNamesFrom` / `pidForName` are the joins. Tested
+  (`tests/name_resolver_test.cpp`).
+- `sweep.buildSnapshot` — now takes resolver-supplied `extraNames` (pid→name),
+  overlaid on the ancestry source's names. Tested (`tests/sweep_test.cpp`).
+- `netgraph_impl.cpp` — the SDK shell: one `m_resolver->stats()` read per sweep
+  feeds both Collector A attribution (`extraNames`) and Collector B pid placement;
+  `collectProviderLabels` binds each source via
+  `modules().bind_connection_source(name).collectConnections()` and parses it
+  through `provider_parse`. One broken/missing provider is skipped, never fatal.
+  Compiles against the SDK (not buildable in the dev sandbox); all logic sits in
+  the tested pure functions.
+
 Deferred:
 
-- **Collector B** provider bind + the pid→name resolver — both wait on the
-  attribution decision above (marked TODO in `netgraph_impl.cpp`).
+- **Install the real resolver** for path (a): bind the logoscore-cli
+  `core_service` and parse its `getModuleStats()` in `makeResolver()`. Blocked
+  only by (i) the exact `core_service` binding API and (ii) the one-line upstream
+  `pid` add (finding above). `NullNameResolver` is the honest default until then.
 - **M0 doctest** under `logoscore` — open a known connection, see it in
-  `snapshot()` (mirrors openmetrics' `doctests/`). Wants the attribution path
-  chosen so the doctest can assert real module names via (a).
-- openmetrics cross-check (you scoped it in early) — reads openmetrics'
-  aggregated counters, compares reported peers vs sockets per pid, surfaces the
-  gap. An optional declared dependency; lands with Collector B.
+  `snapshot()` (mirrors openmetrics' `doctests/`), asserting real module names via
+  the path-(a) resolver. Deferred pending the doctest-harness YAML format
+  (openmetrics-module was not available on this host to copy it exactly).
+- **openmetrics cross-check** — reads openmetrics' aggregated counters, compares
+  reported peers vs sockets per pid, surfaces the gap. Optional declared
+  dependency; lands with the production resolver.
+- **macOS** — `macos_socket_table.cpp` / `macos_process_source.cpp` still
+  unverified off-device; verify on Apple Silicon.
 
 ## Next step
 
-Decide the attribution path (a/b/c), then wire Collector B + the resolver and
-write the M0 doctest. macOS verification on an Apple Silicon box in parallel.
+1. Land the one-line `pid` add in `logos-liblogos` `getModuleStats()`.
+2. Install the path-(a) `core_service` resolver in `makeResolver()` and confirm
+   the exact bind API against the generator/openmetrics.
+3. Write the M0 doctest once the harness YAML format is confirmed.
+4. macOS verification on an Apple Silicon box in parallel.

@@ -59,8 +59,8 @@ Install with `lgpm install --file` or through Basecamp's Package Manager.
 
 ## Tests
 
-Pure unit tests (parse, merge, sweep) run without the Logos SDK, plus a live
-Linux collector check:
+Pure unit tests (parse, merge, provider-parse, name-resolver, sweep) run without
+the Logos SDK, plus a live Linux collector check:
 
 ```bash
 cd module && NLOHMANN_INC=/path/to/nlohmann-include ./tests/run_local.sh
@@ -71,5 +71,8 @@ See [`module/tests/README.md`](module/tests/README.md).
 ## Status
 
 M0 (Collector A + the pure sweep pipeline) is built and tested; the Linux
-collector is verified against a live `/proc`. Collector B (provider bind + pid
-name attribution) and the `logoscore` doctest are next. See `DESIGN.md`.
+collector is verified against a live `/proc`. Collector B is now wired: the pure
+payload parser, the pid↔name resolver seam, and the `netgraph_impl` binding are
+in place and unit-tested; what remains is installing the real (path-a) resolver
+under `logoscore` — including a one-line upstream `pid` add to `getModuleStats()`
+— and the `logoscore` doctest. See `DESIGN.md`.
