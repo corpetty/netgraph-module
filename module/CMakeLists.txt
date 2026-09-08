@@ -18,7 +18,7 @@ endif()
 # The platform socket tables and pid sources are self-guarded (#if __linux__ /
 # __APPLE__), so all are listed here and each compiles to nothing off its host.
 logos_module(
-    NAME netgraph
+    NAME netgraph_module
     SOURCES
         src/netgraph_impl.h
         src/netgraph_impl.cpp
@@ -43,5 +43,10 @@ logos_module(
 )
 
 # The sweep runs on a std::thread; link the platform threads library.
+# logos_module(NAME netgraph_module) creates the CMake target
+# `${NAME}_module_plugin` = `netgraph_module_module_plugin` (the built artifact
+# is OUTPUT_NAME `netgraph_module_plugin`, matching metadata.json `main`). The
+# doubled `_module_` is the builder's target-naming convention, same as every
+# `<x>_module` sibling (storage_module, delivery_module, ...).
 find_package(Threads REQUIRED)
-target_link_libraries(netgraph_module_plugin PRIVATE Threads::Threads)
+target_link_libraries(netgraph_module_module_plugin PRIVATE Threads::Threads)

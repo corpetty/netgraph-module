@@ -1,0 +1,377 @@
+name: "Observing a Known Connection with netgraph (M0)"
+output: netgraph-module-m0.md
+release: ""
+
+intro: |
+  `netgraph_module` is a universal Logos module that observes, in real time,
+  every network connection the running Logos process tree holds — DNS lookups,
+  plain HTTPS to a bootstrap host, RPC endpoints — and serves the merged list
+  from a single `snapshot()` call. Collection is **off until turned on** (it sees
+  the host's whole connection graph, a surveillance surface) and keeps nothing
+  while off.
+
+  This doc-test is the **M0 end-to-end proof**: it packages **this** module
+  commit as an `.lgx`, installs it with `lgpm`, and drives it through a headless
+  `logoscore` daemon. Its shape mirrors `openmetrics`' scrape doctest — stand the
+  module up, then read its cached document — with one netgraph-specific twist:
+
+  1. Build the `logoscore` runtime and the `lgpm` package manager.
+  2. Build **this** `netgraph_module`'s `.lgx` from its flake's `#lgx` output and
+     install it into a local `./modules` directory.
+  3. Open a **known** TCP connection from a throw-away process on a fixed
+     loopback port, and note that process's PID.
+  4. Start the daemon, load `netgraph_module`, and `setEnabled` with
+     `root_pid` pointed at that PID — so the sweep enumerates exactly that
+     process's sockets (Collector A: process ancestry → `/proc/net` → socket
+     table, no `ss`/`lsof`/`netstat`).
+  5. Read `snapshot()` and assert the known connection is in it.
+
+  Because every layer (host, module loader, IPC, the collector) comes from the
+  commit under test, a green run is direct evidence that **this** netgraph commit
+  actually observes a real connection end-to-end.
+
+what_you_build: "This `netgraph_module`, packaged as `.lgx`, installed with `lgpm`, and driven through a `logoscore` daemon — enabled against a known loopback connection whose endpoint then shows up in `snapshot()`."
+
+what_you_learn:
+  - How to build the Logos runtime and the `lgpm` package manager from source
+  - How a module's Nix flake exposes a ready-to-install `.lgx` via its `#lgx` output
+  - How to install an `.lgx` into a modules directory with `lgpm`
+  - How to start the `logoscore` daemon, load `netgraph_module`, and call its methods
+  - How netgraph's `setEnabled` / `snapshot` / `getInfo` surface works, and how
+    `root_pid` scopes the sweep to a process subtree
+  - How a known connection opened outside the Logos tree becomes visible in
+    `snapshot()` once the sweep is pointed at the process that holds it
+
+prerequisites:
+  - |
+    **Nix** with flakes enabled. Install from [nixos.org](https://nixos.org/download.html), then enable flakes:
+
+    ```bash
+    mkdir -p ~/.config/nix
+    echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+    ```
+
+    Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
+  - "**A Linux or macOS machine.** The daemon runs headless; no display is required."
+  - "**`python3`** on your `PATH` — used only to hold a known connection open for the sweep to observe. Verify: `python3 --version`"
+  - "**`jq`** on your `PATH` — `snapshot()` and `getInfo()` return a JSON *string*, which `logoscore call` wraps as `{\"result\":\"…escaped…\"}`; `jq -r '.result'` decodes it back to raw JSON so we can assert on its fields. Verify: `jq --version`"
+
+sections:
+  - title: "Build the Logos daemon"
+    step: true
+    text: |
+      Build the `logoscore` runtime CLI from its published flake. The result is a
+      `logoscore` binary under a symlinked `./logos` directory — the headless
+      frontend for [`logos-liblogos`](https://github.com/logos-co/logos-liblogos)
+      that brings in the whole module-runtime stack netgraph needs.
+    steps:
+      - title: "Build the CLI"
+        run: "nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos"
+        code_block: |
+          nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos
+        check_file: "logos/bin/logoscore"
+        post_text: |
+          The build produces `logos/bin/logoscore` plus bundled runtime libraries
+          and a `logos/modules/` directory containing the built-in
+          `capability_module` (required for the auth handshake when loading
+          modules).
+
+  - title: "Build the lgpm package manager"
+    step: true
+    text: |
+      `lgpm` installs `.lgx` packages into a modules directory and scans what is
+      installed. Build it from the `logos-package-manager` flake and link it as
+      `./lgpm`.
+    steps:
+      - title: "Build lgpm"
+        run: "nix build 'github:logos-co/logos-package-manager#cli' -o lgpm"
+        check_file: "lgpm/bin/lgpm"
+        post_text: "The executable is at `./lgpm/bin/lgpm`."
+
+  - title: "Build and install this netgraph module"
+    step: true
+    text: |
+      Build **this** `netgraph_module`'s `.lgx` straight from its flake's `#lgx`
+      output and install it into a local `./modules` directory with `lgpm`. The
+      flake lives under `module/` in the repo, so the ref carries `?dir=module`.
+      Every module built with
+      [`logos-module-builder`](https://github.com/logos-co/logos-module-builder)
+      exposes a ready-to-install `#lgx`.
+    steps:
+      - title: "Build the module's .lgx"
+        text: |
+          Build the `#lgx` output and link it as `./netgraph-lgx`. (This compiles
+          the module and its SDK glue through Nix, so the first build is slow.)
+        run: "nix build 'github:corpetty/netgraph-module{release}?dir=module#lgx' -o netgraph-lgx"
+        code_block: |
+          # From inside the clone this is simply: nix build 'path:./module#lgx'
+          nix build 'github:corpetty/netgraph-module{release}?dir=module#lgx' -o netgraph-lgx
+        post_text: "The `.lgx` package is now under `./netgraph-lgx/`:"
+        extra_run:
+          run: "ls netgraph-lgx/*.lgx"
+
+      - title: "Seed the modules directory with the bundled capability module"
+        text: |
+          Modules are loaded through the host's capability layer, so the modules
+          directory also needs the `capability_module` that ships with
+          `logoscore`. Copy it across first.
+        run: |
+          mkdir -p modules
+          cp -RL ./logos/modules/. ./modules/
+        check_file: "modules/capability_module/manifest.json"
+
+      - title: "Install the .lgx with lgpm"
+        text: |
+          Install the freshly-built package into `./modules`. `netgraph_module` is
+          a `core` module, so it goes to `--modules-dir`. The package is unsigned
+          (a local dev build), so we pass `--allow-unsigned`.
+        run: "./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file netgraph-lgx/*.lgx"
+        expect_contains:
+          - "Installed to:"
+
+      - title: "Confirm the install"
+        text: "Scan the directory and confirm the module landed:"
+        run: "./lgpm/bin/lgpm --modules-dir ./modules list"
+        expect_contains:
+          - "netgraph_module"
+        check_file: "modules/netgraph_module/manifest.json"
+
+  - title: "Open a known connection to observe"
+    step: true
+    text: |
+      netgraph never fabricates a connection — the socket table (Collector A) is
+      the sole authority for what exists. So to prove the observer works we first
+      create a **real** connection with a known endpoint, then point the sweep at
+      the process that holds it.
+
+      The fixture is a tiny throw-away process that opens a loopback TCP
+      connection to itself on a fixed port and then just holds every socket open.
+      Because all three sockets (listener, client, accepted server) live in one
+      process, a single PID owns the whole connection — that PID is what we hand
+      to `root_pid`.
+    steps:
+      - title: "Write the connection fixture"
+        text: |
+          The script binds `127.0.0.1:54545`, connects to itself, records its own
+          PID to `conn.pid` **after** the connection is established (so a later
+          read of that file is proof the connection is up), then sleeps holding
+          every fd open.
+        file:
+          path: hold_connection.py
+          content: |
+            import os
+            import socket
+            import time
+
+            PORT = 54545
+
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(("127.0.0.1", PORT))
+            srv.listen(1)
+
+            cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            cli.connect(("127.0.0.1", PORT))
+            conn, _ = srv.accept()
+
+            # The connection is now ESTABLISHED. Publish our PID only now, so any
+            # reader of conn.pid knows the socket already exists in our /proc fds.
+            with open("conn.pid", "w") as f:
+                f.write(str(os.getpid()))
+
+            # Hold listener + client + accepted socket open indefinitely.
+            time.sleep(3600)
+
+      - title: "Start the fixture in the background"
+        text: |
+          Launch it detached so it survives past this step; the daemon and the
+          sweep run alongside it.
+        run: "sh -c 'python3 hold_connection.py > conn.log 2>&1 &'"
+        code_block: "python3 hold_connection.py &"
+
+      - run: "sleep 2"
+
+      - title: "Confirm the fixture is up"
+        text: |
+          `conn.pid` exists only once the connection is established. Read it — this
+          is the PID we scope the sweep to:
+        run: "cat conn.pid"
+        check_file: "conn.pid"
+
+  - title: "Run the daemon and observe the connection"
+    step: true
+    text: |
+      Start `logoscore` in daemon mode pointed at `./modules`, load
+      `netgraph_module`, enable it against the fixture's PID, and read the
+      snapshot. Daemon output is captured in `logs.txt`.
+    steps:
+      - title: "Start the daemon"
+        text: |
+          Start logoscore in daemon mode in the background, capturing output to
+          `logs.txt`:
+        run: "sh -c './logos/bin/logoscore -D -m ./modules > logs.txt 2>&1 &'"
+        code_block: "logoscore -D -m ./modules > logs.txt &"
+        post_text: |
+          The `-D` flag starts the daemon. The client subcommands below connect to
+          this running process via the config written under `~/.logoscore/`.
+
+      - run: "sleep 3"
+
+      - title: "List discovered modules"
+        text: "`netgraph_module` should be visible in the scan directory:"
+        run: "./logos/bin/logoscore list-modules"
+        code_block: "logoscore list-modules"
+        expect_contains:
+          - "netgraph_module"
+
+      - title: "Load the module"
+        text: "Load `netgraph_module` into the running daemon:"
+        run: "./logos/bin/logoscore load-module netgraph_module"
+        code_block: "logoscore load-module netgraph_module"
+        expect_contains:
+          - "netgraph_module"
+
+      - title: "Confirm the module is loaded"
+        text: |
+          Re-run `status`; the module that was `not_loaded` before now reports
+          `loaded`:
+        run: "./logos/bin/logoscore status"
+        code_block: "logoscore status"
+        expect_contains:
+          - "netgraph_module"
+          - '"status":"loaded"'
+
+      - title: "Introspect the module with module-info"
+        text: |
+          `module-info` lists the `Q_INVOKABLE` methods the module exposes — the
+          three-method surface described in the design: the user switch, the
+          cached read, and status:
+        run: "./logos/bin/logoscore module-info netgraph_module"
+        code_block: "logoscore module-info netgraph_module"
+        expect_contains:
+          - "netgraph_module"
+          - "setEnabled"
+          - "snapshot"
+          - "getInfo"
+
+      - title: "Confirm it starts empty and disabled"
+        text: |
+          Before we turn it on, `snapshot()` reports the off state — collection is
+          off until explicitly enabled, and nothing is retained while off. We
+          decode the string return with `jq -r '.result'`:
+        run: "./logos/bin/logoscore call netgraph_module snapshot | jq -r '.result'"
+        code_block: "logoscore call netgraph_module snapshot | jq -r '.result'"
+        expect_contains:
+          - '"enabled":false'
+          - '"connections":[]'
+
+      - title: "Write the enable config, scoped to the fixture"
+        text: |
+          `setEnabled` takes a JSON config string. We pin `root_pid` to the
+          fixture's PID so the sweep enumerates exactly that process's sockets,
+          set a short `sweep_ms` so a fresh snapshot lands quickly, and keep
+          `include_host: true` so the fixture process (the sweep root) is itself
+          included. Each command runs in its own shell, so we read the PID back
+          from `conn.pid` and bake it into the file here:
+        run: |
+          cat > netgraph-config.json <<EOF
+          {
+            "enabled": true,
+            "sweep_ms": 500,
+            "include_host": true,
+            "root_pid": $(cat conn.pid)
+          }
+          EOF
+          cat netgraph-config.json
+        code_block: |
+          cat > netgraph-config.json <<EOF
+          {
+            "enabled": true,
+            "sweep_ms": 500,
+            "include_host": true,
+            "root_pid": $(cat conn.pid)
+          }
+          EOF
+        check_file: "netgraph-config.json"
+
+      - title: "Enable collection"
+        text: |
+          Turn the observer on. The `@file` syntax loads the config file's
+          contents as the (single string) argument. `setEnabled` returns `1` on a
+          state change:
+        run: "./logos/bin/logoscore call netgraph_module setEnabled @netgraph-config.json"
+        code_block: "logoscore call netgraph_module setEnabled @netgraph-config.json"
+        expect_contains:
+          - '"result":1'
+
+      - title: "Wait for a sweep to complete"
+        text: |
+          The sweep runs on its own timer and publishes a cached snapshot; give it
+          more than one `sweep_ms` interval to complete the first pass:
+        run: "sleep 2"
+
+      - title: "Confirm the sweep is running"
+        text: |
+          `getInfo` reports the live state. With collection on, `enabled` and
+          `sweeping` are both true:
+        run: "./logos/bin/logoscore call netgraph_module getInfo | jq -r '.result'"
+        code_block: "logoscore call netgraph_module getInfo | jq -r '.result'"
+        expect_contains:
+          - '"enabled":true'
+          - '"sweeping":true'
+
+      - title: "Read the snapshot and find the known connection"
+        text: |
+          `snapshot()` returns the merged connection array from the last completed
+          sweep. The fixture's loopback endpoint — address `127.0.0.1` and port
+          `54545` — is present, proof the observer saw the real socket the fixture
+          holds (its listener, and the established client/server pair). These two
+          substrings carry no quotes, so they match whether or not the string
+          return is wrapped/escaped — the headline assertion stays robust:
+        run: "./logos/bin/logoscore call netgraph_module snapshot"
+        code_block: "logoscore call netgraph_module snapshot | jq -r '.result'"
+        expect_contains:
+          - "127.0.0.1"
+          - "54545"
+
+      - title: "Disable collection"
+        text: |
+          Turn the observer back off. It stops the sweep and drops the cached
+          snapshot — nothing is retained while off:
+        run: |
+          printf '{"enabled":false}' > netgraph-off.json
+          ./logos/bin/logoscore call netgraph_module setEnabled @netgraph-off.json
+        code_block: 'logoscore call netgraph_module setEnabled ''{"enabled":false}'''
+        expect_contains:
+          - '"result":1'
+
+      - title: "Confirm it is off again"
+        text: "With collection off, the snapshot reports the off state once more — the cached rows are gone:"
+        run: "./logos/bin/logoscore call netgraph_module snapshot | jq -r '.result'"
+        code_block: "logoscore call netgraph_module snapshot | jq -r '.result'"
+        expect_contains:
+          - '"enabled":false'
+          - '"connections":[]'
+
+      - title: "Stop the fixture"
+        text: "Release the held connection:"
+        run: "kill \"$(cat conn.pid)\" 2>/dev/null || true"
+        code_block: "kill \"$(cat conn.pid)\""
+
+      - title: "Stop the daemon"
+        text: "Shut the daemon down cleanly:"
+        run: "./logos/bin/logoscore stop"
+        code_block: "logoscore stop"
+        post_text: |
+          The daemon removes its state file and exits.
+
+      - run: "sleep 2"
+
+      - title: "Confirm the daemon has stopped"
+        text: |
+          With no daemon running, the client reports `not_running` and exits
+          non-zero, so we add `|| true` to let the doc-test assert on the output:
+        run: "./logos/bin/logoscore status || true"
+        code_block: "logoscore status"
+        expect_contains:
+          - '"status":"not_running"'
