@@ -1,0 +1,110 @@
+name: netgraph-module Doc-Tests
+
+# Runs the executable M0 doc-test end-to-end via the shared doctest CLI
+# (github:logos-co/logos-doctest):
+#   - netgraph-module-m0.test.yaml: packages and installs THIS commit of the
+#     module as an .lgx, starts a logoscore daemon, loads netgraph_module, opens
+#     a known loopback connection, enables collection scoped to it, and asserts
+#     the endpoint shows up in snapshot().
+#
+# The HTML execution report is uploaded as a build artifact for each OS. (No
+# gh-pages publishing here — keep the workflow self-contained; download the
+# artifact to view the rendered report.)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: doctests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  doctests:
+    name: netgraph-module doc-tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Cold cachix builds the whole logoscore + module stack, so be generous.
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: logos-co
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      # Resolve the commit under test. For pull requests this is the PR's head
+      # commit (not the synthetic merge commit); for pushes it's the pushed
+      # commit. Passed to --release-for so the doc-test packages THIS commit of
+      # netgraph-module rather than the latest master.
+      #
+      # Fork PRs are the exception: their head commit lives in the fork, not in
+      # corpetty/netgraph-module, so nix could not fetch
+      # `github:corpetty/netgraph-module/<sha>`. We blank the SHA for forks so
+      # the {release} placeholder pins to latest and the run still executes,
+      # just against main.
+      - name: Resolve commit under test
+        id: commit
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && \
+             [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            echo "sha=" >> "$GITHUB_OUTPUT"
+            echo "Fork PR detected — doc-test will run against latest main."
+          else
+            echo "sha=${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --release-for pins the {release} placeholder for netgraph-module to the
+      # commit under test, so `github:corpetty/netgraph-module{release}?dir=module`
+      # in the spec becomes `.../<sha>?dir=module`. --continue-on-fail walks every
+      # step so the report is complete; the job still fails if any step failed.
+      - name: Run netgraph-module doc-test
+        run: |
+          nix run github:logos-co/logos-doctest -- run \
+            module/doctests/netgraph-module-m0.test.yaml \
+            --verbose \
+            --continue-on-fail \
+            --release-for netgraph-module=${{ steps.commit.outputs.sha }} \
+            --report "${{ runner.temp }}/netgraph-doctest-report.html"
+
+      - name: Stage report for upload
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p report-out
+          if [ -f "${{ runner.temp }}/netgraph-doctest-report.html" ]; then
+            cp "${{ runner.temp }}/netgraph-doctest-report.html" report-out/index.html
+          else
+            echo "<h1>No report produced</h1>" > report-out/index.html
+          fi
+
+      - name: Upload doc-test execution report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgraph-doctest-report-${{ matrix.os }}
+          path: report-out/index.html
+          if-no-files-found: warn
+
+      - name: Verify markdown generation
+        run: |
+          nix run github:logos-co/logos-doctest -- generate \
+            module/doctests/netgraph-module-m0.test.yaml \
+            --release-for netgraph-module=${{ steps.commit.outputs.sha }} \
+            -o /tmp/netgraph-module-m0.md
+          test -s /tmp/netgraph-module-m0.md
+          echo "Generated markdown successfully"

@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Build the module against the real SDK through the Logos module builder.
+  # netgraph's flake lives under module/, so every nix ref targets ./module.
+  build:
+    name: Build module (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: logos-co
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      - name: Build module
+        run: nix build ./module --print-build-logs
+
+  # Run the pure parse/merge/sweep unit tests (no SDK). They compile with a plain
+  # C++17 toolchain + nlohmann/json via tests/run_local.sh; we supply both from
+  # nixpkgs so the job is self-contained. On Linux this also exercises the live
+  # /proc collector smoke test.
+  test:
+    name: Pure unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Run pure tests
+        run: |
+          # run_local.sh needs a C++ compiler ($CXX, default g++) and an include
+          # dir containing nlohmann/json.hpp ($NLOHMANN_INC). Build the header
+          # package once (cached) and point the script at it.
+          NLOHMANN_INC="$(nix build --no-link --print-out-paths nixpkgs#nlohmann_json)/include"
+          test -f "$NLOHMANN_INC/nlohmann/json.hpp"
+          nix shell nixpkgs#gcc --command \
+            env NLOHMANN_INC="$NLOHMANN_INC" bash module/tests/run_local.sh
