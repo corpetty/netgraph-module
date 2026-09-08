@@ -235,6 +235,22 @@ this design, the README, and the access-policy notes all call it
 module now loads as `netgraph_module`, matching the M0 doctest and the policy
 entry `netgraph_ui -> netgraph_module`.
 
+**BUILD BRING-UP (2026-09-08).** The first real SDK build (CI + a local
+`nix build ./module`) surfaced three things the dev sandbox never could — all
+now fixed and the module builds green end-to-end, producing
+`netgraph_module_plugin.so` and the `#lgx`:
+- The builder derives the impl header (`src/<name>_impl.h`) and impl class
+  (`NetgraphModuleImpl`) from `name`. Our sources predate the rename and keep
+  `netgraph_impl.{h,cpp}` / `NetgraphImpl`, so `metadata.json` now sets
+  `codegen.impl_header` / `codegen.impl_class` to point at them — the same
+  override `storage_module` uses for its plugin header.
+- `module/flake.lock` was uncommitted, so the doctest's build from the immutable
+  `github:corpetty/netgraph-module{release}?dir=module` source failed with
+  "cannot write modified lock file". Now committed.
+- `netgraph_impl.h` used `netgraph::ProviderLabel` (in `collectProviderLabels`'s
+  return type) without including its definition — a latent bug that only bites a
+  real compile. Added `#include "merge.h"`.
+
 Built and unit-tested (pure, no SDK — `tests/run_local.sh`, all green), and the
 Linux collector verified against this host's live `/proc`:
 

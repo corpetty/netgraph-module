@@ -29,7 +29,10 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Build module
-        run: nix build ./module --print-build-logs
+        # --accept-flake-config lets the module flake's nixConfig add the Logos
+        # Attic cache (cache.nix.logos.co) as a substituter, so the SDK/Qt
+        # closure is pulled rather than rebuilt.
+        run: nix build ./module --print-build-logs --accept-flake-config
 
   # Run the pure parse/merge/sweep unit tests (no SDK). They compile with a plain
   # C++17 toolchain + nlohmann/json via tests/run_local.sh; we supply both from
