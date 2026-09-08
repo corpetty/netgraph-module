@@ -20,6 +20,7 @@
 // attribution, module stays null) when absent — the accepted degraded behaviour.
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -65,6 +66,30 @@ public:
 class NullNameResolver : public INameResolver {
 public:
     std::vector<ModuleStat> stats() override { return {}; }
+};
+
+// A resolver backed by a caller-supplied fetch of the raw getModuleStats
+// payload. netgraph_impl builds one whose fetch binds `core_service` under the
+// logoscore daemon (path a) — the SDK-touching part is a one-line lambda, while
+// the decode stays here in tested pure code. A fetch that throws (no such module
+// under Basecamp, a denied token, an IPC error) is swallowed to an empty result:
+// "no attribution this sweep", the same honest degrade as NullNameResolver.
+class CallbackNameResolver : public INameResolver {
+public:
+    explicit CallbackNameResolver(std::function<LogosMap()> fetch)
+        : m_fetch(std::move(fetch)) {}
+
+    std::vector<ModuleStat> stats() override {
+        if (!m_fetch) return {};
+        try {
+            return parseModuleStats(m_fetch());
+        } catch (...) {
+            return {};  // provider absent / call failed => no attribution
+        }
+    }
+
+private:
+    std::function<LogosMap()> m_fetch;
 };
 
 }  // namespace netgraph

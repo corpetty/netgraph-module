@@ -9,7 +9,8 @@
   "interface": "universal",
   "dependencies": [],
   "interface_dependencies": [
-    { "name": "connection_source", "file": "interfaces/connection_source.h", "impl_class": "IConnectionSource" }
+    { "name": "connection_source", "file": "interfaces/connection_source.h", "impl_class": "IConnectionSource" },
+    { "name": "core_service", "file": "interfaces/core_service.h", "impl_class": "ICoreService" }
   ],
 
   "nix": {

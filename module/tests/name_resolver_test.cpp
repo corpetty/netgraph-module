@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 
 #include "name_resolver.h"
@@ -64,6 +65,23 @@ int main() {
     CHECK(parseModuleStats(std::string("not json")).empty());
     CHECK(parseModuleStats(std::string("{}")).empty());
     CHECK(parseModuleStats(std::string("[]")).empty());
+
+    // CallbackNameResolver (path a): decodes whatever its fetch returns, and
+    // swallows a throwing fetch to an empty result (host without core_service).
+    {
+        CallbackNameResolver good([] {
+            return LogosMap::parse(R"([{"name":"mix_module","pid":4242}])");
+        });
+        auto s = good.stats();
+        CHECK(s.size() == 1);
+        CHECK(pidForName(s, "mix_module") == 4242);
+
+        CallbackNameResolver throwing([]() -> LogosMap { throw std::runtime_error("no such module"); });
+        CHECK(throwing.stats().empty());
+
+        CallbackNameResolver empty(nullptr);   // no fetch installed
+        CHECK(empty.stats().empty());
+    }
 
     if (failures == 0) std::printf("name_resolver_test: OK\n");
     else std::printf("name_resolver_test: %d FAILURE(S)\n", failures);
