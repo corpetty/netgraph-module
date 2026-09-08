@@ -80,6 +80,11 @@ private:
     void runLoop();      // the timer thread body: sweep, wait, repeat
     void doSweepAndPublish(const Config& cfg);
 
+    // Build the pid<->name resolver for the chosen attribution path. A member
+    // (not a free function) because it binds `core_service` through modules().
+    // See the definition and DESIGN "Process-tree attribution".
+    std::unique_ptr<netgraph::INameResolver> makeResolver();
+
     // Collector B: bind each configured connection_source provider, collect its
     // payload through the SDK wrapper, and parse it (provider_parse.cpp) into
     // labels. `stats` is this sweep's pid<->name attribution, used to place each

@@ -25,34 +25,38 @@ int64_t nowMs() {
     return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
-// Install the pid<->name resolver for the chosen attribution path.
-//
-// Default: NullNameResolver — honest under a host that exposes no reachable stats
-// table (plain Basecamp today). Every row keeps a real pid and module:null.
-//
-// Path (a), the M0 doctest under logoscore: bind the daemon's `core_service`
-// module and parse its getModuleStats() through netgraph::parseModuleStats. That
-// binding is only available under logoscore-cli, so it is installed by the
-// doctest fixture / a build flag, not unconditionally here.
-//
-// Path (b), production under Basecamp: a small stats-exporting core module
-// declared as a netgraph interface_dependency, bound the same way as a
-// connection_source and parsed with the same parseModuleStats.
-//
-// BOTH paths need a pid in the stats payload. The real
-// logos_core_get_module_stats() does NOT emit one today (it computes the pid but
-// only reports name/cpu/mem) — a one-line upstream add of "pid" unlocks
-// attribution; until then parseModuleStats yields hasPid=false and this resolver
-// still returns names, they just don't attribute. See DESIGN "Process-tree
-// attribution".
-std::unique_ptr<netgraph::INameResolver> makeResolver() {
-    return std::make_unique<netgraph::NullNameResolver>();
-}
-
 }  // namespace
 
 NetgraphImpl::~NetgraphImpl() {
     stopSweep();
+}
+
+// Build the pid<->name resolver for the chosen attribution path.
+//
+// Path (a) — wired here: bind the logoscore daemon's `core_service` gateway
+// (declared as an interface_dependency in metadata.json → generated
+// `bind_core_service`) and decode its getModuleStats() through the pure
+// netgraph::parseModuleStats. The bound call is a one-line lambda behind
+// CallbackNameResolver; if `core_service` is absent (any host that is not the
+// logoscore daemon — e.g. Basecamp), or the call is denied/errors, the resolver
+// swallows it and returns nothing, so every row keeps a real pid and
+// module:null. That honest degrade is exactly what NullNameResolver did, so
+// path (a) is a strict superset and safe to install unconditionally.
+//
+// Path (b), production under Basecamp: a small stats-exporting core module
+// implementing the SAME ICoreService interface, bound to its own name — no code
+// change here beyond the bound name, so it drops in when it exists.
+//
+// BOTH paths need a pid in the stats payload. getModuleStats() (now the
+// process-stats library) computes the pid but historically did not emit it;
+// parseModuleStats reads "pid" when present and degrades to name-only
+// (module:null) when absent, so netgraph is correct before and after the
+// process-stats one-line "pid" add. See DESIGN "Process-tree attribution".
+std::unique_ptr<netgraph::INameResolver> NetgraphImpl::makeResolver() {
+    return std::make_unique<netgraph::CallbackNameResolver>(
+        [this]() -> LogosMap {
+            return modules().bind_core_service("core_service").getModuleStats();
+        });
 }
 
 int64_t NetgraphImpl::setEnabled(const std::string& configJson) {

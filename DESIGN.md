@@ -282,10 +282,24 @@ every layer that does not require the live SDK/host, and unit-tested:
 
 Deferred:
 
-- **Install the real resolver** for path (a): bind the logoscore-cli
-  `core_service` and parse its `getModuleStats()` in `makeResolver()`. Blocked
-  only by (i) the exact `core_service` binding API and (ii) the one-line upstream
-  `pid` add (finding above). `NullNameResolver` is the honest default until then.
+- ~~**Install the real resolver** for path (a).~~ **Done (2026-09-08).** The
+  exact `core_service` API was confirmed against `logos-logoscore-cli`
+  (`src/core_service/core_service_impl.h`): `LogosList getModuleStats()`, whose
+  body is `nlohmann::json::parse(logos_core_get_module_stats())` — i.e. the
+  process-stats payload verbatim. So netgraph now declares a second
+  `interface_dependency` on `core_service` (`interfaces/core_service.h`,
+  `impl_class: ICoreService`), and `makeResolver()` (now a member, so it can
+  reach `modules()`) returns a `CallbackNameResolver` whose fetch is
+  `modules().bind_core_service("core_service").getModuleStats()`, decoded by the
+  pure `parseModuleStats`. `CallbackNameResolver` swallows a failing fetch to an
+  empty result, so on any host without `core_service` (Basecamp) it degrades to
+  exactly the old `NullNameResolver` behaviour — module:null on every row — which
+  makes installing path (a) unconditionally safe (strict superset). Path (b) is
+  then a drop-in: the same `ICoreService` interface bound to a different module
+  name, no code change here. Still gated on the process-stats `pid` add (PR
+  `logos-co/process-stats#4`) to actually attribute; correct either way until
+  then. Not buildable in the dev sandbox — validated by the tested pure
+  `CallbackNameResolver` unit test + CI's SDK build.
 - **M0 doctest** under `logoscore` — **written (2026-09-08)**, at
   `module/doctests/netgraph-module-m0.test.yaml` (+ `run.sh`), mirroring the
   in-repo `*-module-runtime.test.yaml` specs the sibling modules ship
@@ -307,13 +321,24 @@ Deferred:
 
 ## Next step
 
-1. Land the one-line `pid` add in the `process-stats` repo's `getModuleStats()`
-   (moved out of liblogos — see the 2026-09-08 UPDATE above).
-2. Install the path-(a) `core_service` resolver in `makeResolver()` and confirm
-   the exact bind API against the generator/openmetrics.
-3. ~~Write the M0 doctest once the harness YAML format is confirmed.~~ **Done
-   (2026-09-08)** — `module/doctests/netgraph-module-m0.test.yaml`. Next: publish
-   the repo so the doctest's `github:corpetty/netgraph-module{release}?dir=module#lgx`
-   fetch resolves, then wire it into CI; upgrade its assertions to check module
-   names once the path-(a) resolver lands.
-4. macOS verification on an Apple Silicon box in parallel.
+1. ~~Land the one-line `pid` add in the `process-stats` repo's
+   `getModuleStats()`.~~ **PR open: `logos-co/process-stats#4`** (needs a
+   maintainer merge). Until it lands, attribution stays off and every row is
+   `module:null` — correct, just unlabelled.
+2. ~~Install the path-(a) `core_service` resolver in `makeResolver()` and confirm
+   the exact bind API.~~ **Done (2026-09-08)** — signature confirmed against
+   `logos-logoscore-cli` and wired via a `core_service` interface_dependency +
+   `CallbackNameResolver`; see the Collector B "Deferred" note above.
+3. ~~Write the M0 doctest.~~ **Done (2026-09-08)** —
+   `module/doctests/netgraph-module-m0.test.yaml` on `main`; CI to run it
+   (`.github/workflows/{ci,doctests}.yml`) is in a companion PR. Note: the
+   doctest asserts connection **existence**, not names — its fixture is a plain
+   process, not a loaded module, so `core_service` never attributes it. Asserting
+   names needs a **module-owned** connection in the fixture and process-stats#4
+   merged; that is a later doctest, not a tweak to this one.
+4. **First green CI run** — the CI workflows are the first build of the
+   SDK-facing code (`netgraph_impl` + generated `bind_connection_source` /
+   `bind_core_service`) and the first live daemon run of the doctest; neither was
+   possible in the dev sandbox. Watch that run and fix whatever the real SDK/host
+   surfaces (e.g. the exact generated bind-wrapper spelling).
+5. macOS verification on an Apple Silicon box in parallel.
