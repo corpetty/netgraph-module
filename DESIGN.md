@@ -211,7 +211,29 @@ So the pid problem splits in two, and the split is now in the code:
    (`hasPid=false` → no attribution, `module:null`) when absent — so netgraph is
    correct either way and the one-liner simply switches attribution on.
 
+   **UPDATE (2026-09-08) — the stats source moved; the finding still holds.**
+   `process_stats` has since been extracted from liblogos into its own
+   `process-stats` library (liblogos now imports it via `PROCESS_STATS_ROOT` and
+   calls `ProcessStats::getModuleStats(ModuleManager::getModuleProcessIds())`).
+   `getModuleStats` now takes a name→pid map as input, but its JSON output is
+   still `[{name, cpu_percent, cpu_time_seconds, memory_mb}]` — **no `pid`**
+   (verified against the built `process-stats` source). So the one-line add now
+   lands in the `process-stats` repo's `getModuleStats` (`moduleObj["pid"] =
+   pid;` — the pid is already in scope as the map's value), not in liblogos.
+   `parseModuleStats` is unchanged and still handles both payload shapes.
+
 ## M0 status
+
+**NAMING FIX (2026-09-08).** `metadata.json` and `CMakeLists.txt` named the
+module `netgraph` / `netgraph_plugin`, but every sibling core module registers
+as `<x>_module` (`storage_module`, `delivery_module`, `accounts_module`, …) and
+this design, the README, and the access-policy notes all call it
+`netgraph_module`. Aligned: `logos_module(NAME netgraph_module)`, metadata
+`name: "netgraph_module"`, `main: "netgraph_module_plugin"` (the builder's
+`OUTPUT_NAME` is `${NAME}_plugin`; the CMake target is `${NAME}_module_plugin` =
+`netgraph_module_module_plugin`, referenced by the `Threads` link line). The
+module now loads as `netgraph_module`, matching the M0 doctest and the policy
+entry `netgraph_ui -> netgraph_module`.
 
 Built and unit-tested (pure, no SDK — `tests/run_local.sh`, all green), and the
 Linux collector verified against this host's live `/proc`:
@@ -264,10 +286,19 @@ Deferred:
   `core_service` and parse its `getModuleStats()` in `makeResolver()`. Blocked
   only by (i) the exact `core_service` binding API and (ii) the one-line upstream
   `pid` add (finding above). `NullNameResolver` is the honest default until then.
-- **M0 doctest** under `logoscore` — open a known connection, see it in
-  `snapshot()` (mirrors openmetrics' `doctests/`), asserting real module names via
-  the path-(a) resolver. Deferred pending the doctest-harness YAML format
-  (openmetrics-module was not available on this host to copy it exactly).
+- **M0 doctest** under `logoscore` — **written (2026-09-08)**, at
+  `module/doctests/netgraph-module-m0.test.yaml` (+ `run.sh`), mirroring the
+  in-repo `*-module-runtime.test.yaml` specs the sibling modules ship
+  (storage/delivery — the openmetrics analogue). It packages this commit as an
+  `.lgx`, installs it with `lgpm`, loads it into a headless daemon, opens a
+  **known** loopback connection held by a throw-away process, enables collection
+  scoped to that process (`root_pid`), and asserts `snapshot()` contains the
+  endpoint (`127.0.0.1` / `54545`). It asserts connection **existence**, not
+  module names — name attribution still waits on the path-(a) resolver (below).
+  The socket-visibility core (fixture → `buildSnapshot` scoped to its pid →
+  endpoint in the document) is verified against this host's live `/proc`; the
+  full run needs the published repo + nix stack, so it is CI-ready but not
+  runnable in the dev sandbox.
 - **openmetrics cross-check** — reads openmetrics' aggregated counters, compares
   reported peers vs sockets per pid, surfaces the gap. Optional declared
   dependency; lands with the production resolver.
@@ -276,8 +307,13 @@ Deferred:
 
 ## Next step
 
-1. Land the one-line `pid` add in `logos-liblogos` `getModuleStats()`.
+1. Land the one-line `pid` add in the `process-stats` repo's `getModuleStats()`
+   (moved out of liblogos — see the 2026-09-08 UPDATE above).
 2. Install the path-(a) `core_service` resolver in `makeResolver()` and confirm
    the exact bind API against the generator/openmetrics.
-3. Write the M0 doctest once the harness YAML format is confirmed.
+3. ~~Write the M0 doctest once the harness YAML format is confirmed.~~ **Done
+   (2026-09-08)** — `module/doctests/netgraph-module-m0.test.yaml`. Next: publish
+   the repo so the doctest's `github:corpetty/netgraph-module{release}?dir=module#lgx`
+   fetch resolves, then wire it into CI; upgrade its assertions to check module
+   names once the path-(a) resolver lands.
 4. macOS verification on an Apple Silicon box in parallel.
