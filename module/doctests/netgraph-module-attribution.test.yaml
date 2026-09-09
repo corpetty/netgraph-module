@@ -1,0 +1,175 @@
+name: "Attributing a Connection to its Module (names)"
+output: netgraph-module-attribution.md
+release: ""
+
+intro: |
+  The M0 doc-test proves netgraph observes a real connection. This one proves the
+  other half: **attribution** — putting a module *name* on a connection, not just
+  `module: null`.
+
+  netgraph names a socket by mapping its pid to a module through
+  `core_service.getModuleStats()` (the logoscore daemon's per-module stats). That
+  table lists only **loaded modules**, so a plain background process can never be
+  named — which is why M0's throwaway `python3` fixture stays `module: null`. To
+  get a name we need a connection **owned by a loaded module**.
+
+  So this test loads a second, tiny module — `conn_fixture_module` — whose only
+  job is to hold a known loopback connection open while it is loaded. Its pid is
+  therefore in `getModuleStats()`, and the socket it holds is owned by that pid —
+  exactly the case netgraph attributes. We then:
+
+  1. Build + install **this** `netgraph_module` and the `conn_fixture_module`.
+  2. Load both, and have the fixture open a connection on a known port.
+  3. Enable netgraph over the whole host tree and read `snapshot()`.
+  4. Assert the connection now carries `"module":"conn_fixture_module"`.
+
+  > **Requires the pid-carrying `getModuleStats`.** Attribution only works once
+  > `logos-co/process-stats` emits `pid` (PR #4) AND that has propagated into the
+  > `liblogos` / `logoscore` closure this test builds. Until then netgraph is
+  > correct but unlabelled (`module: null`), and the final assertion here will
+  > fail — which is why this spec is run on demand (workflow_dispatch), not on
+  > every push. See DESIGN "Process-tree attribution".
+
+what_you_build: "This `netgraph_module` plus a `conn_fixture_module` that holds a known connection, both driven through a `logoscore` daemon — with the connection showing up in `snapshot()` attributed to the fixture module by name."
+
+what_you_learn:
+  - How netgraph turns a pid into a module name via core_service.getModuleStats()
+  - Why only a loaded module's connection can be named (and a bare process cannot)
+  - How to load two modules and drive them through one logoscore daemon
+
+prerequisites:
+  - |
+    **Nix** with flakes enabled. Install from [nixos.org](https://nixos.org/download.html), then enable flakes:
+
+    ```bash
+    mkdir -p ~/.config/nix
+    echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+    ```
+
+    Verify: `nix flake --help >/dev/null 2>&1 && echo "Flakes enabled"`
+  - "**A Linux or macOS machine.** The daemon runs headless; no display is required."
+  - "**`jq`** on your `PATH` — to decode the `snapshot()` string return. Verify: `jq --version`"
+
+sections:
+  - title: "Build the daemon and package manager"
+    step: true
+    text: |
+      Build the `logoscore` runtime and the `lgpm` package manager, exactly as in
+      the M0 doc-test.
+    steps:
+      - title: "Build logoscore"
+        run: "nix build 'github:logos-co/logos-logoscore-cli' --out-link ./logos"
+        check_file: "logos/bin/logoscore"
+      - title: "Build lgpm"
+        run: "nix build 'github:logos-co/logos-package-manager#cli' -o lgpm"
+        check_file: "lgpm/bin/lgpm"
+
+  - title: "Build and install both modules"
+    step: true
+    text: |
+      Build **this** `netgraph_module` and the `conn_fixture_module` (both from
+      this repo — the fixture lives under `fixtures/conn_fixture`), and install
+      them into a shared `./modules` directory alongside the bundled
+      `capability_module`.
+    steps:
+      - title: "Build netgraph_module .lgx"
+        run: "nix build 'github:corpetty/netgraph-module{release}?dir=module#lgx' -o netgraph-lgx"
+        code_block: "nix build 'path:./module#lgx' -o netgraph-lgx"
+        extra_run:
+          run: "ls netgraph-lgx/*.lgx"
+
+      - title: "Build conn_fixture_module .lgx"
+        run: "nix build 'github:corpetty/netgraph-module{release}?dir=fixtures/conn_fixture#lgx' -o fixture-lgx"
+        code_block: "nix build 'path:./fixtures/conn_fixture#lgx' -o fixture-lgx"
+        extra_run:
+          run: "ls fixture-lgx/*.lgx"
+
+      - title: "Seed the modules directory with the bundled capability module"
+        run: |
+          mkdir -p modules
+          cp -RL ./logos/modules/. ./modules/
+        check_file: "modules/capability_module/manifest.json"
+
+      - title: "Install both packages"
+        run: |
+          ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file netgraph-lgx/*.lgx
+          ./lgpm/bin/lgpm --modules-dir ./modules --allow-unsigned install --file fixture-lgx/*.lgx
+        expect_contains:
+          - "Installed to:"
+
+      - title: "Confirm both installed"
+        run: "./lgpm/bin/lgpm --modules-dir ./modules list"
+        expect_contains:
+          - "netgraph_module"
+          - "conn_fixture_module"
+        check_file: "modules/conn_fixture_module/manifest.json"
+
+  - title: "Load, open a module-owned connection, and attribute it"
+    step: true
+    text: |
+      Start the daemon, load both modules, have the fixture open a known
+      connection, then enable netgraph over the whole host tree and read the
+      snapshot.
+    steps:
+      - title: "Start the daemon"
+        run: "sh -c './logos/bin/logoscore -D -m ./modules > logs.txt 2>&1 &'"
+        code_block: "logoscore -D -m ./modules > logs.txt &"
+
+      - run: "sleep 3"
+
+      - title: "Load both modules"
+        run: |
+          ./logos/bin/logoscore load-module conn_fixture_module
+          ./logos/bin/logoscore load-module netgraph_module
+        expect_contains:
+          - "netgraph_module"
+
+      - title: "Have the fixture open a known connection"
+        text: |
+          `openLoopback` binds `127.0.0.1:54611`, connects to itself, and holds
+          every socket open for the module's lifetime. It returns the fixture
+          module's pid — the pid netgraph will resolve to `conn_fixture_module`:
+        run: "./logos/bin/logoscore call conn_fixture_module openLoopback 54611"
+        code_block: "logoscore call conn_fixture_module openLoopback 54611"
+        expect_contains:
+          - '"result"'
+
+      - title: "Enable netgraph over the host tree"
+        text: |
+          `root_pid: 0` sweeps the whole Logos host tree (which includes the
+          loaded `conn_fixture_module` subprocess), and `include_host: true` keeps
+          host rows too. No `sources` — attribution here is Collector A + the
+          core_service name resolver, no connection_source provider needed:
+        run: |
+          printf '{"enabled":true,"sweep_ms":500,"include_host":true,"root_pid":0}' > ng-on.json
+          ./logos/bin/logoscore call netgraph_module setEnabled @ng-on.json
+        code_block: 'logoscore call netgraph_module setEnabled ''{"enabled":true,"sweep_ms":500,"include_host":true,"root_pid":0}'''
+        expect_contains:
+          - '"result":1'
+
+      - run: "sleep 2"
+
+      - title: "Read the snapshot and find the attributed connection"
+        text: |
+          The fixture's connection on port `54611` is present AND carries
+          `"module":"conn_fixture_module"` — netgraph mapped the socket's pid to
+          the loaded module's name via `core_service.getModuleStats()`. (This is
+          the assertion that needs the pid-carrying `getModuleStats`; see the
+          intro.)
+        run: "./logos/bin/logoscore call netgraph_module snapshot | jq -r '.result'"
+        code_block: "logoscore call netgraph_module snapshot | jq -r '.result'"
+        expect_contains:
+          - "54611"
+          - '"module":"conn_fixture_module"'
+
+      - title: "Stop the daemon"
+        run: "./logos/bin/logoscore stop"
+        code_block: "logoscore stop"
+
+      - run: "sleep 2"
+
+      - title: "Confirm stopped"
+        run: "./logos/bin/logoscore status || true"
+        code_block: "logoscore status"
+        expect_contains:
+          - '"status":"not_running"'

@@ -338,23 +338,32 @@ Deferred:
 ## Next step
 
 1. ~~Land the one-line `pid` add in the `process-stats` repo's
-   `getModuleStats()`.~~ **PR open: `logos-co/process-stats#4`** (needs a
-   maintainer merge). Until it lands, attribution stays off and every row is
-   `module:null` — correct, just unlabelled.
-2. ~~Install the path-(a) `core_service` resolver in `makeResolver()` and confirm
-   the exact bind API.~~ **Done (2026-09-08)** — signature confirmed against
-   `logos-logoscore-cli` and wired via a `core_service` interface_dependency +
-   `CallbackNameResolver`; see the Collector B "Deferred" note above.
-3. ~~Write the M0 doctest.~~ **Done (2026-09-08)** —
-   `module/doctests/netgraph-module-m0.test.yaml` on `main`; CI to run it
-   (`.github/workflows/{ci,doctests}.yml`) is in a companion PR. Note: the
-   doctest asserts connection **existence**, not names — its fixture is a plain
-   process, not a loaded module, so `core_service` never attributes it. Asserting
-   names needs a **module-owned** connection in the fixture and process-stats#4
-   merged; that is a later doctest, not a tweak to this one.
-4. **First green CI run** — the CI workflows are the first build of the
-   SDK-facing code (`netgraph_impl` + generated `bind_connection_source` /
-   `bind_core_service`) and the first live daemon run of the doctest; neither was
-   possible in the dev sandbox. Watch that run and fix whatever the real SDK/host
-   surfaces (e.g. the exact generated bind-wrapper spelling).
+   `getModuleStats()`.~~ **Merged (2026-09-09): `logos-co/process-stats#4`**,
+   master `6e0aade7`. **But not yet propagated:** `liblogos` master still pins
+   process-stats at `3e58e1c` (pre-merge), and `logoscore-cli` transitively pins
+   the same, so every logoscore the doctests build still ships the pid-less
+   `getModuleStats`. Attribution turns on only after two upstream flake bumps —
+   `liblogos` → new process-stats, then `logoscore-cli` → that liblogos. Until
+   then every row is `module:null` — correct, just unlabelled.
+2. ~~Install the path-(a) `core_service` resolver.~~ **Done (2026-09-08)** —
+   signature confirmed against `logos-logoscore-cli` and wired via a
+   `core_service` interface_dependency + `CallbackNameResolver`.
+3. ~~Write the M0 doctest.~~ + ~~a names/attribution doctest.~~ **Both done.**
+   - `module/doctests/netgraph-module-m0.test.yaml` — connection **existence**;
+     green in CI on `main` (ubuntu + macOS).
+   - `module/doctests/netgraph-module-attribution.test.yaml` (2026-09-09) —
+     connection **naming**. Loads a purpose-built `fixtures/conn_fixture`
+     (`conn_fixture_module`) that holds a known connection *while loaded* (so its
+     pid is in `getModuleStats` — a bare process never is), then asserts
+     `snapshot()` shows `"module":"conn_fixture_module"`. The attribution path is
+     verified locally (`buildSnapshot` + a pid→name map renders the module on the
+     row) and the fixture module builds green; the full run needs propagation
+     (step 1), so it is **run on demand** via `.github/workflows/doctests-
+     attribution.yml` (`workflow_dispatch`), NOT in the gating push/PR CI. When
+     propagation lands, dispatch it (or fold the spec into `doctests.yml`).
+4. **macOS** — now exercised: the M0 doctest is green on `macos-latest` in CI, so
+   the libproc collector + process source work off-Linux. (Was "unverified
+   off-device".)
+5. Optional: **openmetrics cross-check** (declared dependency, later) and the M1
+   classifier / M2 UI milestones.
 5. macOS verification on an Apple Silicon box in parallel.

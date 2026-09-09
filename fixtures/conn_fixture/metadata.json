@@ -1,0 +1,24 @@
+{
+  "name": "conn_fixture_module",
+  "version": "0.0.1",
+  "description": "Doc-test fixture: holds a known loopback TCP connection open while loaded, so the netgraph observer has a module-owned connection to attribute. Not a shipping module.",
+  "author": "corpetty",
+  "type": "core",
+  "category": "testing",
+  "main": "conn_fixture_module_plugin",
+  "interface": "universal",
+  "dependencies": [],
+  "interface_dependencies": [],
+
+  "nix": {
+    "external_libraries": [],
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": []
+    }
+  }
+}
