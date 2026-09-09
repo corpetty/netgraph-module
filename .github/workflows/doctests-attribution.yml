@@ -1,0 +1,74 @@
+name: netgraph-module Attribution Doc-Test (manual)
+
+# The attribution doc-test (netgraph-module-attribution.test.yaml) proves netgraph
+# puts a module NAME on a connection, by loading a conn_fixture_module that holds
+# a known connection and asserting snapshot() shows "module":"conn_fixture_module".
+#
+# It is deliberately NOT wired into the push/PR CI: attribution only works once
+# `logos-co/process-stats` emits `pid` (PR merged) AND that has propagated into
+# the liblogos / logoscore closure this test builds. Until that propagation
+# lands, the final assertion fails by design — so this runs on demand only.
+#
+# Once liblogos + logoscore bump process-stats, run this from the Actions tab (or
+# fold the spec into doctests.yml) to confirm attribution end-to-end.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: doctests-attribution-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  attribution:
+    name: attribution doc-test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: logos-co
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      # Pin {release} to the ref this workflow was dispatched on, so both the
+      # module (?dir=module) and the fixture (?dir=fixtures/conn_fixture) build
+      # from this commit. One --release-for covers both (same repo).
+      - name: Run attribution doc-test
+        run: |
+          nix run github:logos-co/logos-doctest -- run \
+            module/doctests/netgraph-module-attribution.test.yaml \
+            --verbose \
+            --continue-on-fail \
+            --release-for netgraph-module=${{ github.sha }} \
+            --report "${{ runner.temp }}/netgraph-attribution-report.html"
+
+      - name: Stage report for upload
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p report-out
+          if [ -f "${{ runner.temp }}/netgraph-attribution-report.html" ]; then
+            cp "${{ runner.temp }}/netgraph-attribution-report.html" report-out/index.html
+          else
+            echo "<h1>No report produced</h1>" > report-out/index.html
+          fi
+
+      - name: Upload attribution doc-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgraph-attribution-report-${{ matrix.os }}
+          path: report-out/index.html
+          if-no-files-found: warn
