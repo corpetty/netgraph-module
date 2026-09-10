@@ -34,6 +34,31 @@ jobs:
         # closure is pulled rather than rebuilt.
         run: nix build ./module --print-build-logs --accept-flake-config
 
+  # Build the QML view plugin (netgraph_ui) against the real SDK. Its flake lives
+  # under ui/ and pins netgraph_module by the committed flake.lock (github ref),
+  # so this job needs no cross-repo override — it exercises repc codegen + the
+  # generated *Plugin glue + QML packaging exactly as a release build would.
+  build-ui:
+    name: Build UI plugin (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: logos-co
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      - name: Build UI plugin
+        run: nix build ./ui --print-build-logs --accept-flake-config
+
   # Run the pure parse/merge/sweep unit tests (no SDK). They compile with a plain
   # C++17 toolchain + nlohmann/json via tests/run_local.sh; we supply both from
   # nixpkgs so the job is self-contained. On Linux this also exercises the live

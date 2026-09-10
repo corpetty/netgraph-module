@@ -1,0 +1,25 @@
+// The QtRO view contract between NetgraphUiBackend and every QML replica.
+//
+// netgraph_module speaks JSON strings, not typed rows (its snapshot is a whole
+// merged document, nullable fields and all — "the unlabelled rows are the
+// point"). So the view contract is deliberately thin: two SLOTs to drive the
+// backend and three auto-synced PROPs carrying the raw JSON the view parses.
+//
+//   setEnabled(config) -> forwards the operator switch to netgraph_module and
+//                         returns its state-change result (1 changed, 0 no-op).
+//   refresh()          -> pull one snapshot() + getInfo() into the PROPs. The
+//                         view drives cadence with a Timer, per DESIGN ("the UI
+//                         polls snapshot()"); netgraph_module emits no events.
+//
+//   snapshotJson  the last completed sweep's merged connection document.
+//   infoJson      the last getInfo() status line (counts + enabled/sweeping).
+//   lastError     empty on success; a message if a backend call threw.
+class NetgraphUi
+{
+    SLOT(qlonglong setEnabled(QString config))
+    SLOT(void refresh())
+
+    PROP(QString snapshotJson READONLY)
+    PROP(QString infoJson READONLY)
+    PROP(QString lastError READONLY)
+}

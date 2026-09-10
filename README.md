@@ -13,7 +13,7 @@ until turned on** behind an explicit user switch.
 Two deliverables:
 
 1. `netgraph_module` — the backend that collects and merges connection data (this repo, `module/`).
-2. `netgraph_ui` — a QML plugin that renders the graph (later, `ui/`).
+2. `netgraph_ui` — a QML plugin that renders the graph (this repo, `ui/`).
 
 See [`DESIGN.md`](DESIGN.md) for the architecture, the prior-art patterns copied
 from [`openmetrics-module`](https://github.com/logos-co/openmetrics-module), the
@@ -49,13 +49,31 @@ process names.
 
 ## Build
 
+The backend:
+
 ```bash
 cd module
 nix build            # the plugin
 nix build .#lgx      # a .lgx package
 ```
 
-Install with `lgpm install --file` or through Basecamp's Package Manager.
+The view (`netgraph_ui`, a `ui_qml` plugin):
+
+```bash
+cd ui
+nix build            # the QML plugin (repc codegen + generated glue + QML)
+nix build .#lgx      # a .lgx package
+nix run .            # launch the view standalone (logos-standalone-app + ui-host)
+```
+
+`ui/` pins `netgraph_module` by the committed `flake.lock` (a published github
+ref). To co-develop against your local backend tree, override the input:
+
+```bash
+cd ui && nix build --override-input netgraph_module path:../module
+```
+
+Install either with `lgpm install --file` or through Basecamp's Package Manager.
 
 ## Tests
 
@@ -75,4 +93,12 @@ collector is verified against a live `/proc`. Collector B is now wired: the pure
 payload parser, the pid↔name resolver seam, and the `netgraph_impl` binding are
 in place and unit-tested; what remains is installing the real (path-a) resolver
 under `logoscore` — including a one-line upstream `pid` add to `getModuleStats()`
-— and the `logoscore` doctest. See `DESIGN.md`.
+— and the `logoscore` doctest.
+
+M2 (`netgraph_ui`) now exists and builds: a universal `ui_qml` plugin whose
+backend forwards to `netgraph_module` (typed `setEnabled` / `snapshot` /
+`getInfo`) and whose QML view renders the merged connection document as a live
+table, with the collection switch, sweep interval, and host-include control
+wired to `setEnabled`. Unlabelled rows (`module: null`) are shown, not hidden.
+The plugin + `.lgx` build green on Linux and macOS in CI; a visual launch
+(`nix run ./ui`) needs a display. See `DESIGN.md`.

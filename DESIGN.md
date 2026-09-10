@@ -364,6 +364,23 @@ Deferred:
 4. **macOS** — now exercised: the M0 doctest is green on `macos-latest` in CI, so
    the libproc collector + process source work off-Linux. (Was "unverified
    off-device".)
-5. Optional: **openmetrics cross-check** (declared dependency, later) and the M1
-   classifier / M2 UI milestones.
-5. macOS verification on an Apple Silicon box in parallel.
+5. **M2 UI (`netgraph_ui`) — landed (2026-09-10), lives in `ui/`.** A universal
+   `ui_qml` plugin (builder recipe `create-ui-module`): a `.rep` view contract
+   (`src/netgraph_ui.rep`) + a `NetgraphUiBackend` (`src/netgraph_ui_backend.{h,cpp}`)
+   that declares `netgraph_module` as a dependency and forwards the typed
+   `setEnabled(QString)->qlonglong` / `snapshot()->QString` / `getInfo()->QString`
+   callers; the `*Plugin`/`*Interface`/QtRO glue is generated. `src/qml/Main.qml`
+   renders the merged connection document as a live table (a `Timer` polls
+   `refresh()`, since `netgraph_module` emits no events — "the UI polls
+   `snapshot()`") with the collection switch, sweep interval, and include-host
+   control wired to `setEnabled`. Unlabelled rows (`module: null`) are shown.
+   Builds green (plugin + `.lgx`) on Linux and macOS in CI (`build-ui` job);
+   `flake.lock` pins `netgraph_module` by github ref, overridable to
+   `path:../module` for co-development. Still to do: a visual/integration run
+   (`nix run ./ui`, `tests/ui-tests.mjs` via `logos-qt-mcp` — needs a display),
+   the access-policy entry `netgraph_ui -> netgraph_module` tested under
+   `enforce`, and richer rendering (grouping/graph view) once attribution lights
+   up (Next step 1).
+6. Optional: **openmetrics cross-check** (declared dependency, later) and the M1
+   classifier milestone.
+7. macOS verification on an Apple Silicon box in parallel.
