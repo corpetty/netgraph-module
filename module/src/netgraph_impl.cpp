@@ -89,17 +89,23 @@ int64_t NetgraphImpl::setEnabled(const std::string& configJson) {
         if (enable == m_enabled) return 0;  // config updated, no state change
         m_enabled = enable;
 
-        if (enable) {
-            startNow = true;
-        } else {
-            stopNow = true;
-            m_snapshot = R"({"enabled":false,"swept_at":0,"connections":[]})";
-            m_lastSockets = m_lastAttributed = m_lastDerived = 0;
-        }
+        if (enable) startNow = true;
+        else        stopNow = true;
     }
     // Thread lifecycle happens outside the data lock (join must not hold it).
     if (startNow) startSweep();
-    if (stopNow) stopSweep();
+    if (stopNow) {
+        // Reset the snapshot only AFTER the sweep thread is joined. A sweep runs
+        // its socket enumeration without the lock and re-acquires it at the end
+        // of doSweepAndPublish() to publish; resetting before the join races that
+        // final write and can leave the stale connections doc in m_snapshot after
+        // we are already disabled. stopSweep() joins the thread, so once it
+        // returns no sweep can publish again — the reset here is the last write.
+        stopSweep();
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_snapshot = R"({"enabled":false,"swept_at":0,"connections":[]})";
+        m_lastSockets = m_lastAttributed = m_lastDerived = 0;
+    }
     return 1;
 }
 
