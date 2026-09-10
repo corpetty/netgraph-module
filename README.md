@@ -75,6 +75,15 @@ cd ui && nix build --override-input netgraph_module path:../module
 
 Install either with `lgpm install --file` or through Basecamp's Package Manager.
 
+## Access policy
+
+Under a host running `--access-policy` in `enforce` mode, `netgraph_ui` must be
+listed as an allowed caller of `netgraph_module` — a `ui_qml` plugin is not
+auto-tracked as a dependent, so the host won't add it on its own. The entry is
+shipped as [`access-policy.example.json`](access-policy.example.json); see
+[`ACCESS-POLICY.md`](ACCESS-POLICY.md) for the contract and how to merge it into
+a deployment's policy.
+
 ## Tests
 
 Pure unit tests (parse, merge, provider-parse, name-resolver, sweep) run without
