@@ -1,0 +1,28 @@
+{
+  "name": "netgraph_ui",
+  "version": "0.0.1",
+  "description": "The netgraph view: a live, local-only table of every network connection the Logos process tree holds, grouped by the module that opened it. Polls netgraph_module.snapshot(); collection is off until turned on here.",
+  "author": "corpetty",
+  "type": "ui_qml",
+  "interface": "universal",
+  "category": "monitoring",
+  "main": "netgraph_ui_plugin",
+  "view": "qml/Main.qml",
+  "icon": null,
+  "dependencies": ["netgraph_module"],
+  "codegen": { "rep": "src/netgraph_ui.rep" },
+
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}
