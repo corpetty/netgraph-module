@@ -128,6 +128,24 @@ unlabelled rows are the point.
    `netgraph_ui -> netgraph_module` needs an explicit policy entry because
    `ui_qml` plugins are not tracked as dependents. Test under `enforce` from M0.
 
+   **RESOLVED (2026-09-10) — the entry is shipped.** The host installs one JSON
+   policy via `logos_core_set_access_policy()` before `logos_core_start()`
+   (`logoscore --access-policy <file|inline>`); shape
+   `{version, mode:"enforce", restrictions:{ target:{allowedCallers:[...]} }}`,
+   a target absent from `restrictions` is unrestricted, enforcement is
+   `capability_module` refusing a token for a disallowed caller (contract:
+   `liblogos` `logos_core.h`). netgraph's entry —
+   `"netgraph_module": { "allowedCallers": ["netgraph_ui"] }` — is provided as
+   [`access-policy.example.json`](access-policy.example.json) and documented in
+   [`ACCESS-POLICY.md`](ACCESS-POLICY.md). The interface_dependencies
+   (`connection_source`/`core_service`) need no entry: this restricts callers
+   *of* netgraph_module, not the interfaces it calls. **Still pending: a live
+   `enforce` run.** The real caller path needs `netgraph_ui` in `ui-host` (a
+   headless `logoscore call` is a different caller identity), and a local run
+   here was blocked by the dev-built `.lgx` variant tag (`linux-amd64-dev`) that
+   `lgpm` won't install; verify manually under Basecamp / a release `logoscore`
+   per `ACCESS-POLICY.md`.
+
 ## Packaging / integration
 
 This directory is a staging scaffold. The catalog builds each module from a git
