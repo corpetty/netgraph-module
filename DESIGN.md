@@ -397,12 +397,20 @@ Deferred:
    `path:../module` for co-development. **Confirmed rendering in Basecamp
    (2026-09-17):** installed via `.#lgx-portable` (NOT `.#lgx` — that is the
    dev-store variant `lgpm` rejects; see the Build section), the view renders and
-   turning collection on drives the sweeps and populates rows live. The current
-   view is a flat connection list. Still to do: richer rendering (grouping / a
-   graph view) — lands more naturally once attribution fills the `module` labels
-   (Next step 1); the access-policy entry tested under `enforce` (the entry is
-   shipped — handoff #4 — the live proof needs a policy-on run); and the
-   automated `tests/ui-tests.mjs` via `logos-qt-mcp` (needs a display in CI).
+   turning collection on drives the sweeps and populates rows live. The view now
+   offers two modes (a `table`/`graph` toggle): a **table** grouped by module or
+   network (collapsible group headers), and a **graph** — a deterministic
+   bipartite node-link diagram (group nodes ↔ remote-endpoint nodes, edges
+   weighted by connection count, remotes capped to the busiest N; drawn on a
+   `Canvas` with a `groupBy`-driven left column). Both generalise as attribution
+   fills the `module` labels: today the left side is one `(unattributed)` hub
+   fanning to the remotes it talks to; with labels it fans into real services.
+   Still to do: labelled/coloured-by-network views once attribution lands (Next
+   step 1); interaction on the graph (hover/pin/filter) and a force layout if the
+   deterministic columns prove too rigid; the access-policy entry tested under
+   `enforce` (the entry is shipped — handoff #4 — the live proof needs a
+   policy-on run); and the automated `tests/ui-tests.mjs` via `logos-qt-mcp`
+   (needs a display in CI).
 6. Optional: **openmetrics cross-check** (declared dependency, later) and the M1
    classifier milestone.
 7. macOS verification on an Apple Silicon box in parallel.
