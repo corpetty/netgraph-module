@@ -53,27 +53,38 @@ The backend:
 
 ```bash
 cd module
-nix build            # the plugin
-nix build .#lgx      # a .lgx package
+nix build              # the plugin
+nix build .#lgx-portable   # a self-contained .lgx to install into Basecamp
 ```
 
 The view (`netgraph_ui`, a `ui_qml` plugin):
 
 ```bash
 cd ui
-nix build            # the QML plugin (repc codegen + generated glue + QML)
-nix build .#lgx      # a .lgx package
-nix run .            # launch the view standalone (logos-standalone-app + ui-host)
+nix build              # the QML plugin (repc codegen + generated glue + QML)
+nix build .#lgx-portable   # a self-contained .lgx to install into Basecamp
+nix run .              # launch the view standalone (logos-standalone-app + ui-host)
 ```
 
+Install each `result/*.lgx` with `lgpm install --file result/*.lgx` or through
+Basecamp's Package Manager.
+
+**Use `.#lgx-portable`, not `.#lgx`, for anything you install into Basecamp.**
+`.#lgx` produces the *dev* variant (`linux-amd64-dev`): it resolves its libraries
+from `/nix/store` at runtime, so `lgpm`/Basecamp reject it ("no variant matching
+this platform"). It is only for a dev host running the module straight from the
+store (e.g. `nix run .`). `.#lgx-portable` produces the release variant
+(`linux-amd64`) with its dependencies bundled alongside the plugin — that is what
+installs.
+
 `ui/` pins `netgraph_module` by the committed `flake.lock` (a published github
-ref). To co-develop against your local backend tree, override the input:
+ref), so its `.lgx` bundles the *published* backend. To co-develop against your
+local backend tree, override the input (note: this reintroduces the dev-tree
+variant, so use it for `nix build` / `nix run`, not for a Basecamp install):
 
 ```bash
 cd ui && nix build --override-input netgraph_module path:../module
 ```
-
-Install either with `lgpm install --file` or through Basecamp's Package Manager.
 
 ## Access policy
 
@@ -104,10 +115,12 @@ in place and unit-tested; what remains is installing the real (path-a) resolver
 under `logoscore` — including a one-line upstream `pid` add to `getModuleStats()`
 — and the `logoscore` doctest.
 
-M2 (`netgraph_ui`) now exists and builds: a universal `ui_qml` plugin whose
-backend forwards to `netgraph_module` (typed `setEnabled` / `snapshot` /
-`getInfo`) and whose QML view renders the merged connection document as a live
-table, with the collection switch, sweep interval, and host-include control
-wired to `setEnabled`. Unlabelled rows (`module: null`) are shown, not hidden.
-The plugin + `.lgx` build green on Linux and macOS in CI; a visual launch
-(`nix run ./ui`) needs a display. See `DESIGN.md`.
+M2 (`netgraph_ui`) is built and **confirmed running in Basecamp**: a universal
+`ui_qml` plugin whose backend forwards to `netgraph_module` (typed `setEnabled` /
+`snapshot` / `getInfo`) and whose QML view renders the merged connection document
+as a live table, with the collection switch, sweep interval, and host-include
+control wired to `setEnabled`. Turning collection on drives the sweeps and the
+rows populate live. Unlabelled rows (`module: null`) are shown, not hidden. The
+plugin + `.lgx` build green on Linux and macOS in CI. The current view is a flat
+connection list; grouping and a graph rendering are the next UI step (and land
+more naturally once attribution lights up the `module` labels). See `DESIGN.md`.
