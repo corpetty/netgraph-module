@@ -61,10 +61,13 @@ Why this specific entry:
 - A **live end-to-end enforce run is not yet exercised in CI.** Driving the real
   caller path requires `netgraph_ui` running in `ui-host` (a headless
   `logoscore call` is a different caller identity, so it cannot stand in for the
-  view). Verify manually under Basecamp / a release `logoscore`: install both
-  `.lgx`es, start the host with `--access-policy access-policy.example.json`,
-  open the netgraph view, turn collection on, and confirm rows appear (the call
-  is allowed). Flip the entry to a bogus caller and confirm the view can no
-  longer read the backend (the call is denied) — that is the enforce proof.
+  view). The view itself is confirmed rendering and collecting in Basecamp
+  (without an enforce policy); what remains is proving the allowlist gates it.
+  Verify manually under Basecamp / a release `logoscore`: install both
+  `.#lgx-portable` packages, start the host with `--access-policy
+  access-policy.example.json`, open the netgraph view, turn collection on, and
+  confirm rows appear (the call is allowed). Flip the entry to a bogus caller and
+  confirm the view can no longer read the backend (the call is denied) — that is
+  the enforce proof.
 
 See [`DESIGN.md`](DESIGN.md) "Handoff points" #4.

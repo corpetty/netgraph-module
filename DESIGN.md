@@ -394,11 +394,15 @@ Deferred:
    control wired to `setEnabled`. Unlabelled rows (`module: null`) are shown.
    Builds green (plugin + `.lgx`) on Linux and macOS in CI (`build-ui` job);
    `flake.lock` pins `netgraph_module` by github ref, overridable to
-   `path:../module` for co-development. Still to do: a visual/integration run
-   (`nix run ./ui`, `tests/ui-tests.mjs` via `logos-qt-mcp` — needs a display),
-   the access-policy entry `netgraph_ui -> netgraph_module` tested under
-   `enforce`, and richer rendering (grouping/graph view) once attribution lights
-   up (Next step 1).
+   `path:../module` for co-development. **Confirmed rendering in Basecamp
+   (2026-09-17):** installed via `.#lgx-portable` (NOT `.#lgx` — that is the
+   dev-store variant `lgpm` rejects; see the Build section), the view renders and
+   turning collection on drives the sweeps and populates rows live. The current
+   view is a flat connection list. Still to do: richer rendering (grouping / a
+   graph view) — lands more naturally once attribution fills the `module` labels
+   (Next step 1); the access-policy entry tested under `enforce` (the entry is
+   shipped — handoff #4 — the live proof needs a policy-on run); and the
+   automated `tests/ui-tests.mjs` via `logos-qt-mcp` (needs a display in CI).
 6. Optional: **openmetrics cross-check** (declared dependency, later) and the M1
    classifier milestone.
 7. macOS verification on an Apple Silicon box in parallel.
