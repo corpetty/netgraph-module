@@ -357,12 +357,24 @@ Deferred:
 
 1. ~~Land the one-line `pid` add in the `process-stats` repo's
    `getModuleStats()`.~~ **Merged (2026-09-09): `logos-co/process-stats#4`**,
-   master `6e0aade7`. **But not yet propagated:** `liblogos` master still pins
-   process-stats at `3e58e1c` (pre-merge), and `logoscore-cli` transitively pins
-   the same, so every logoscore the doctests build still ships the pid-less
-   `getModuleStats`. Attribution turns on only after two upstream flake bumps —
-   `liblogos` → new process-stats, then `logoscore-cli` → that liblogos. Until
-   then every row is `module:null` — correct, just unlabelled.
+   master `6e0aade7` — verified present: `src/process_stats.cpp` `getModuleStats`
+   emits `moduleObj["pid"] = pid;`. **Still not propagated (re-verified
+   2026-09-17):** `logos-co/logos-liblogos` master (`3c3377a3`) still locks its
+   `process-stats` input at `3e58e1c` (pre-fix), and `logos-co/logos-logoscore-cli`
+   pins that liblogos, so every logoscore the doctests build still ships the
+   pid-less `getModuleStats`. Every row stays `module:null` — correct, just
+   unlabelled. Attribution turns on after two flake-lock bumps, in order:
+   - **(1a) `logos-co/logos-liblogos`**: `nix flake update process-stats`. Verified
+     a clean 3-line `flake.lock` change — liblogos's own root `process-stats`
+     input moves `3e58e1c → 6e0aade7`. (A separate stale transitive `process-stats`
+     node remains under a nested self-reference; it is not liblogos's build input,
+     but worth a note to the liblogos owner.)
+   - **(1b) `logos-co/logos-logoscore-cli`**: `nix flake update logos-liblogos`
+     (after 1a merges), so the daemon picks up the pid-emitting stats. netgraph's
+     attribution doctest (`doctests/netgraph-module-attribution.test.yaml`, on
+     `workflow_dispatch`) is the end-to-end check once this lands.
+   Both are logos-co org repos — the bumps are prepared/verified but the PRs are
+   outward; open them per the maintainers' contribution flow.
 2. ~~Install the path-(a) `core_service` resolver.~~ **Done (2026-09-08)** —
    signature confirmed against `logos-logoscore-cli` and wired via a
    `core_service` interface_dependency + `CallbackNameResolver`.
